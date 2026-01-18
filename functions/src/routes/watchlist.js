@@ -1,37 +1,43 @@
 const express = require('express');
 const router = express.Router();
 const { dynamodb } = require('../config/aws');
+const admin = require('firebase-admin'); // ← ADD THIS
 
 const TABLE_NAME = process.env.DDB_TABLE_NAME || 'UserWatchlists';
 
-/**
- * Middleware to extract user ID from request
- * In production, this would verify Firebase auth token
- * For now, we'll use a mock user ID for testing
- * 
- * TODO: Add Firebase auth verification
- */
-function getUserId(req) {
-  // For testing, use a mock user ID
-  // In production, extract from verified Firebase token
-  return req.headers['x-user-id'] || 'test-user-123';
+async function verifyToken(req, res, next) {
+  try {
+    const authHeader = req.headers.authorization;
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        error: { code: 'UNAUTHORIZED', message: 'Missing or invalid token' }
+      });
+    }
+    
+    const token = authHeader.split('Bearer ')[1];
+    const decodedToken = await admin.auth().verifyIdToken(token);
+    
+    req.uid = decodedToken.uid;
+    next();
+    
+  } catch (error) {
+    console.error('Token verification failed:', error);
+    res.status(401).json({
+      error: { code: 'UNAUTHORIZED', message: 'Invalid token' }
+    });
+  }
 }
+
+router.use(verifyToken);
 
 /**
  * GET /api/watchlist
- * Get user's saved watchlist from DynamoDB
- * 
- * Response example:
- * {
- *   uid: "user123",
- *   watchlist: ["AAPL", "GOOGL", "NVDA"],
- *   updatedAt: 1705512000000
- * }
  */
 router.get('/', async (req, res) => {
   try {
-    const uid = getUserId(req);
-    console.log(`Fetching watchlist for user: ${uid}`);
+    const uid = req.uid; // ← CHANGED from getUserId(req)
+    console.log(`Fetching watchlist for user: ${uid}`); // ← FIXED template literal
     
     const params = {
       TableName: TABLE_NAME,
@@ -41,7 +47,6 @@ router.get('/', async (req, res) => {
     const result = await dynamodb.get(params).promise();
     
     if (!result.Item) {
-      // User has no watchlist yet, return empty
       return res.json({
         uid,
         watchlist: [],
@@ -64,23 +69,10 @@ router.get('/', async (req, res) => {
 
 /**
  * POST /api/watchlist
- * Save user's watchlist to DynamoDB
- * 
- * Request body:
- * {
- *   watchlist: ["AAPL", "GOOGL", "NVDA"]
- * }
- * 
- * Response:
- * {
- *   uid: "user123",
- *   watchlist: ["AAPL", "GOOGL", "NVDA"],
- *   updatedAt: 1705512000000
- * }
  */
 router.post('/', async (req, res) => {
   try {
-    const uid = getUserId(req);
+    const uid = req.uid; // ← CHANGED from getUserId(req)
     const { watchlist } = req.body;
     
     if (!Array.isArray(watchlist)) {
@@ -92,7 +84,7 @@ router.post('/', async (req, res) => {
       });
     }
     
-    console.log(`Saving watchlist for user: ${uid}`);
+    console.log(`Saving watchlist for user: ${uid}`); // ← FIXED template literal
     
     const item = {
       uid,
@@ -122,12 +114,11 @@ router.post('/', async (req, res) => {
 
 /**
  * DELETE /api/watchlist
- * Delete user's watchlist from DynamoDB
  */
 router.delete('/', async (req, res) => {
   try {
-    const uid = getUserId(req);
-    console.log(`Deleting watchlist for user: ${uid}`);
+    const uid = req.uid; // ← CHANGED from getUserId(req)
+    console.log(`Deleting watchlist for user: ${uid}`); // ← FIXED template literal
     
     const params = {
       TableName: TABLE_NAME,

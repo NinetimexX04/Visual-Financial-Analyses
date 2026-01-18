@@ -7,9 +7,13 @@ const awsRegion = defineSecret('AWS_REGION');
 const ddbTableName = defineSecret('DDB_TABLE_NAME');
 const s3BucketName = defineSecret('S3_BUCKET_NAME');
 
-const functions = require('firebase-functions');  // ← Only ONE of these
+const functions = require('firebase-functions');
 const express = require('express');
 const cors = require('cors');
+const admin = require('firebase-admin'); // ← ADD THIS
+
+// Initialize Firebase Admin (needed for token verification)
+admin.initializeApp(); // ← ADD THIS
 
 // Create Express app
 const app = express();
@@ -22,11 +26,14 @@ app.use(express.json());
 const stocksRouter = require('./src/routes/stocks');
 const correlationsRouter = require('./src/routes/correlations');
 const watchlistRouter = require('./src/routes/watchlist');
+const profileRouter = require('./src/routes/profile'); // ← ADD THIS
 
 // Mount routes
 app.use('/stocks', stocksRouter);
 app.use('/correlations', correlationsRouter);
 app.use('/watchlist', watchlistRouter);
+app.use('/profile', profileRouter); // ← ADD THIS
+app.post('/bootstrap', profileRouter); // ← ADD THIS (special case)
 
 // Health check
 app.get('/health', (req, res) => {
@@ -48,6 +55,14 @@ app.get('/', (req, res) => {
         get: 'GET /api/watchlist',
         save: 'POST /api/watchlist',
         delete: 'DELETE /api/watchlist'
+      },
+      profile: { // ← ADD THIS
+        bootstrap: 'POST /api/bootstrap',
+        get: 'GET /api/profile',
+        update: 'PUT /api/profile',
+        imageInit: 'POST /api/profile-image/init',
+        imageComplete: 'POST /api/profile-image/complete',
+        imageUrl: 'GET /api/profile-image/url'
       }
     }
   });

@@ -22,7 +22,6 @@ async function getCurrentPrices() {
       })
     );
     
-    console.log(results);
     return results;
   } catch (error) {
     console.error('Error fetching stock data:', error);
