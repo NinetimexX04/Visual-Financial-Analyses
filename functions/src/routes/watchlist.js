@@ -3,7 +3,7 @@ const router = express.Router();
 const { dynamodb } = require('../config/aws');
 const admin = require('firebase-admin'); // ← ADD THIS
 
-const TABLE_NAME = process.env.DDB_TABLE_NAME || 'UserWatchlists';
+const TABLE_NAME = process.env.DDB_TABLE_NAME || 'Users';
 
 async function verifyToken(req, res, next) {
   try {

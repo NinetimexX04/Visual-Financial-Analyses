@@ -10,10 +10,10 @@ const s3BucketName = defineSecret('S3_BUCKET_NAME');
 const functions = require('firebase-functions');
 const express = require('express');
 const cors = require('cors');
-const admin = require('firebase-admin'); // ← ADD THIS
+const admin = require('firebase-admin'); 
 
 // Initialize Firebase Admin (needed for token verification)
-admin.initializeApp(); // ← ADD THIS
+admin.initializeApp(); 
 
 // Create Express app
 const app = express();
@@ -26,7 +26,7 @@ app.use(express.json());
 const stocksRouter = require('./src/routes/stocks');
 const correlationsRouter = require('./src/routes/correlations');
 const watchlistRouter = require('./src/routes/watchlist');
-const profileRouter = require('./src/routes/profile'); // ← ADD THIS
+const profileRouter = require('./src/routes/profile'); 
 
 // Mount routes
 app.use('/stocks', stocksRouter);
@@ -57,7 +57,7 @@ app.get('/', (req, res) => {
         save: 'POST /api/watchlist',
         delete: 'DELETE /api/watchlist'
       },
-      profile: { // ← ADD THIS
+      profile: { 
         bootstrap: 'POST /api/bootstrap',
         get: 'GET /api/profile',
         update: 'PUT /api/profile',

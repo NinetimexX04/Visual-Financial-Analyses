@@ -6,7 +6,7 @@ const admin = require('firebase-admin');
 const TABLE_NAME = process.env.DDB_TABLE_NAME || 'Users';
 const BUCKET_NAME = process.env.S3_BUCKET_NAME;
 
-const VALID_ROLES = ['Parent', 'Educator', 'Admin'];
+const VALID_ROLES = ['Beginner', 'Intermediate', 'Expert'];
 
 /**
  * Middleware to verify Firebase token and extract uid
@@ -315,92 +315,3 @@ router.get('/url', async (req, res) => {  // ← CHANGED from '/profile-image/ur
   }
 });
 
-/**
- * POST /api/profile-image/complete
- * Save profile image key to DynamoDB after successful S3 upload
- */
-router.post('/profile-image/complete', async (req, res) => {
-  try {
-    const { uid } = req;
-    const { objectKey } = req.body;
-    
-    if (!objectKey) {
-      return res.status(400).json({
-        error: { code: 'VALIDATION_ERROR', message: 'objectKey is required' }
-      });
-    }
-    
-    // Validate object key belongs to this user
-    if (!objectKey.startsWith(`users/${uid}/`)) {
-      return res.status(400).json({
-        error: { code: 'VALIDATION_ERROR', message: 'Invalid object key for user' }
-      });
-    }
-    
-    // Update profile with image key
-    const params = {
-      TableName: TABLE_NAME,
-      Key: { uid },
-      UpdateExpression: 'SET profileImageKey = :key, updatedAt = :updatedAt',
-      ExpressionAttributeValues: {
-        ':key': objectKey,
-        ':updatedAt': new Date().toISOString()
-      },
-      ReturnValues: 'ALL_NEW'
-    };
-    
-    const result = await dynamodb.update(params).promise();
-    
-    res.json(result.Attributes);
-    
-  } catch (error) {
-    console.error('Complete profile image error:', error);
-    res.status(500).json({
-      error: { code: 'COMPLETE_ERROR', message: 'Failed to complete image upload' }
-    });
-  }
-});
-
-/**
- * GET /api/profile-image/url
- * Get pre-signed URL to view current profile image
- */
-router.get('/profile-image/url', async (req, res) => {
-  try {
-    const { uid } = req;
-    
-    // Get profile to find image key
-    const getParams = {
-      TableName: TABLE_NAME,
-      Key: { uid }
-    };
-    
-    const result = await dynamodb.get(getParams).promise();
-    
-    if (!result.Item || !result.Item.profileImageKey) {
-      return res.status(404).json({
-        error: { code: 'NOT_FOUND', message: 'No profile image found' }
-      });
-    }
-    
-    // Generate pre-signed GET URL (15 minute expiry)
-    const viewUrl = s3.getSignedUrl('getObject', {
-      Bucket: BUCKET_NAME,
-      Key: result.Item.profileImageKey,
-      Expires: 900 // 15 minutes
-    });
-    
-    res.json({
-      imageUrl: viewUrl,
-      objectKey: result.Item.profileImageKey
-    });
-    
-  } catch (error) {
-    console.error('Get profile image URL error:', error);
-    res.status(500).json({
-      error: { code: 'URL_ERROR', message: 'Failed to get image URL' }
-    });
-  }
-});
-
-module.exports = router;
