@@ -32,8 +32,9 @@ const profileRouter = require('./src/routes/profile'); // ← ADD THIS
 app.use('/stocks', stocksRouter);
 app.use('/correlations', correlationsRouter);
 app.use('/watchlist', watchlistRouter);
-app.use('/profile', profileRouter); // ← ADD THIS
-app.post('/bootstrap', profileRouter); // ← ADD THIS (special case)
+app.post('/bootstrap', profileRouter);
+app.use('/profile-image', profileRouter);
+app.use('/profile', profileRouter);
 
 // Health check
 app.get('/health', (req, res) => {
