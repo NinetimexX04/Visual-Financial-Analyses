@@ -6,7 +6,7 @@ const admin = require('firebase-admin');
 const TABLE_NAME = process.env.DDB_TABLE_NAME || 'Users';
 const BUCKET_NAME = process.env.S3_BUCKET_NAME;
 
-const VALID_ROLES = ['Beginner', 'Intermediate', 'Expert'];
+const VALID_ROLES = ['Investor', 'Analyst', 'Trader'];
 
 /**
  * Middleware to verify Firebase token and extract uid
@@ -41,7 +41,7 @@ async function verifyToken(req, res, next) {
 router.use(verifyToken);
 
 /**
- * POST /api/bootstrap
+ * POST /bootstrap (or /api/bootstrap via index.js)
  * Called on first login - creates profile if it doesn't exist
  */
 router.post('/bootstrap', async (req, res) => {
@@ -71,9 +71,9 @@ router.post('/bootstrap', async (req, res) => {
       email,
       displayName: email.split('@')[0], // Use email prefix as default name
       phone: '',
-      role: 'Parent', // Default role
+      role: 'Investor', // Default role
       profileImageKey: null,
-      watchlist: [], // Your bonus feature
+      watchlist: [], // Watchlist feature
       createdAt: now,
       updatedAt: now
     };
@@ -96,7 +96,7 @@ router.post('/bootstrap', async (req, res) => {
 });
 
 /**
- * GET /api/profile
+ * GET /profile (or /api/profile via index.js)
  * Get current user's profile
  */
 router.get('/', async (req, res) => {
@@ -127,7 +127,7 @@ router.get('/', async (req, res) => {
 });
 
 /**
- * PUT /api/profile
+ * PUT /profile (or /api/profile via index.js)
  * Update profile fields (displayName, phone, role)
  */
 router.put('/', async (req, res) => {
@@ -198,7 +198,7 @@ router.put('/', async (req, res) => {
  * POST /init (when mounted at /profile-image)
  * Generate pre-signed URL for uploading profile image to S3
  */
-router.post('/init', async (req, res) => {  // ← CHANGED from '/profile-image/init'
+router.post('/init', async (req, res) => {
   try {
     const { uid } = req;
     
@@ -231,7 +231,7 @@ router.post('/init', async (req, res) => {  // ← CHANGED from '/profile-image/
  * POST /complete (when mounted at /profile-image)
  * Save profile image key to DynamoDB after successful S3 upload
  */
-router.post('/complete', async (req, res) => {  // ← CHANGED from '/profile-image/complete'
+router.post('/complete', async (req, res) => {
   try {
     const { uid } = req;
     const { objectKey } = req.body;
@@ -277,7 +277,7 @@ router.post('/complete', async (req, res) => {  // ← CHANGED from '/profile-im
  * GET /url (when mounted at /profile-image)
  * Get pre-signed URL to view current profile image
  */
-router.get('/url', async (req, res) => {  // ← CHANGED from '/profile-image/url'
+router.get('/url', async (req, res) => {
   try {
     const { uid } = req;
     
@@ -315,3 +315,4 @@ router.get('/url', async (req, res) => {  // ← CHANGED from '/profile-image/ur
   }
 });
 
+module.exports = router;

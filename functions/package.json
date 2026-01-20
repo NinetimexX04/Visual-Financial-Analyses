@@ -13,6 +13,7 @@
   },
   "main": "index.js",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
     "aws-sdk": "^2.1693.0",
     "axios": "^1.13.2",
     "cors": "^2.8.5",

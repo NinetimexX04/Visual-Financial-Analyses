@@ -65,16 +65,21 @@ export const api = {
   
   // Stocks (public - no auth required)
   getStocks: () => publicFetch('/stocks'),
+  getStockSentiment: () => publicFetch('/stocks/sentiment'),
+  lookupTicker: (ticker) => publicFetch(`/stocks/lookup/${encodeURIComponent(ticker)}`),
   
   // Correlations (public - no auth required)
   getCorrelations: () => publicFetch('/correlations'),
-  refreshCorrelations: () => publicFetch('/correlations/refresh'),
+  refreshCorrelations: () => fetch(`${API_BASE}/correlations/refresh`, { method: 'POST' }).then(r => r.json()),
+
+  // Sentiment refresh
+  refreshSentiment: () => fetch(`${API_BASE}/stocks/sentiment/refresh`, { method: 'POST' }).then(r => r.json()),
   
-  // Watchlist (requires auth)
-  getWatchlist: () => authFetch('/watchlist'),
-  saveWatchlist: (watchlist) => authFetch('/watchlist', {
+  // Watchlists (requires auth)
+  getWatchlists: () => authFetch('/watchlist'),
+  saveWatchlists: (watchlists, activeWatchlist) => authFetch('/watchlist', {
     method: 'POST',
-    body: JSON.stringify({ watchlist }),
+    body: JSON.stringify({ watchlists, activeWatchlist }),
   }),
-  deleteWatchlist: () => authFetch('/watchlist', { method: 'DELETE' }),
+  deleteWatchlist: (name) => authFetch(`/watchlist/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 };

@@ -12,66 +12,66 @@ function Login() {
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
-    const handleSubmit = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
 
     try {
-        if (isSignup) {
-        // Sign up new user
+      if (isSignup) {
         await createUserWithEmailAndPassword(auth, email, password);
-        
-        // IMPORTANT: Wait a moment for Firebase to initialize the user
         await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // Bootstrap profile on first login
         try {
-            await api.bootstrap();
+          await api.bootstrap();
         } catch (bootstrapError) {
-            console.error('Bootstrap failed:', bootstrapError);
-            // Continue anyway - profile page will handle it
+          console.error('Bootstrap failed:', bootstrapError);
         }
-        } else {
-        // Sign in existing user
+      } else {
         await signInWithEmailAndPassword(auth, email, password);
-        }
-        
-        // Redirect to profile page
-        navigate('/profile');
-        
+      }
+      navigate('/profile');
     } catch (err) {
-        console.error('Auth error:', err);
-        setError(err.message || 'Authentication failed');
+      console.error('Auth error:', err);
+      setError(err.message || 'Authentication failed');
     } finally {
-        setLoading(false);
+      setLoading(false);
     }
-    };
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 flex items-center justify-center p-4">
-      <div className="bg-gray-800 rounded-lg shadow-2xl p-8 w-full max-w-md">
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      {/* Logo/Brand at top */}
+      <div className="absolute top-6 left-6 flex items-center gap-2">
+        <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+          <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+          </svg>
+        </div>
+        <span className="text-lg font-bold text-gray-900">StockViz</span>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 w-full max-w-md">
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-white mb-2">
-            Market Correlations
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">
+            {isSignup ? 'Create your account' : 'Welcome back'}
           </h1>
-          <p className="text-gray-400">
-            {isSignup ? 'Create your account' : 'Sign in to your account'}
+          <p className="text-gray-500 text-sm">
+            {isSignup ? 'Start analyzing market correlations' : 'Sign in to continue to StockViz'}
           </p>
         </div>
 
         {/* Error Message */}
         {error && (
-          <div className="bg-red-500/10 border border-red-500 text-red-500 px-4 py-3 rounded mb-4">
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4 text-sm">
             {error}
           </div>
         )}
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-5">
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
               Email
             </label>
             <input
@@ -79,13 +79,13 @@ function Login() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
               placeholder="you@example.com"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
               Password
             </label>
             <input
@@ -94,7 +94,7 @@ function Login() {
               onChange={(e) => setPassword(e.target.value)}
               required
               minLength={6}
-              className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
               placeholder="••••••••"
             />
           </div>
@@ -102,9 +102,16 @@ function Login() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white font-semibold py-3 rounded-lg transition-colors duration-200"
+            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white font-medium py-2.5 rounded-lg transition-colors"
           >
-            {loading ? 'Loading...' : (isSignup ? 'Sign Up' : 'Sign In')}
+            {loading ? (
+              <span className="flex items-center justify-center gap-2">
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                Loading...
+              </span>
+            ) : (
+              isSignup ? 'Sign Up' : 'Sign In'
+            )}
           </button>
         </form>
 
@@ -115,7 +122,7 @@ function Login() {
               setIsSignup(!isSignup);
               setError('');
             }}
-            className="text-blue-400 hover:text-blue-300 text-sm"
+            className="text-blue-600 hover:text-blue-700 text-sm font-medium"
           >
             {isSignup
               ? 'Already have an account? Sign in'
