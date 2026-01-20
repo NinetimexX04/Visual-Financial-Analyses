@@ -66,7 +66,7 @@ async function calculateCorrelationMatrix(tickers) {
 
     // Build edges - connect ALL stocks above threshold
     const edges = [];
-    const CORRELATION_THRESHOLD = 0.5; // Adjust as needed
+    const CORRELATION_THRESHOLD = 0.6; // Adjust as needed
     
     for (let i = 0; i < validData.length; i++) {
       for (let j = i + 1; j < validData.length; j++) {

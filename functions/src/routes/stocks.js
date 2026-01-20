@@ -1,17 +1,27 @@
 const express = require('express');
 const router = express.Router();
-const { getCurrentPrices, ALL_STOCKS } = require('../services/stockData');
+const { getCurrentPrices, DEFAULT_STOCKS } = require('../services/stockData');
 const { getStockSentiment } = require('../services/newsAnalysis');
 const { getFromS3, saveToS3 } = require('../services/s3');
 
 const SENTIMENT_CACHE_KEY = 'sentiment/analysis.json';
-const CACHE_DURATION_HOURS = 4; // Refresh sentiment every 4 hours
+const CACHE_DURATION_HOURS = 4;
 
+/**
+ * GET /api/stocks
+ * Fetches current prices for given tickers (or defaults)
+ */
 router.get('/', async (req, res) => {
   try {
-    console.log('Fetching current stock prices...');
+    // Get tickers from query param, fallback to defaults
+    const tickersParam = req.query.tickers;
+    const tickers = tickersParam
+      ? tickersParam.split(',').map(t => t.trim().toUpperCase())
+      : DEFAULT_STOCKS;
 
-    const stocks = await getCurrentPrices();
+    console.log(`Fetching prices for: ${tickers.join(', ')}`);
+
+    const stocks = await getCurrentPrices(tickers);
 
     res.json({
       stocks: stocks,
@@ -31,7 +41,7 @@ router.get('/', async (req, res) => {
 
 /**
  * GET /api/stocks/lookup/:ticker
- * Validates and fetches data for a single ticker from Yahoo Finance
+ * Validates a single ticker against Yahoo Finance
  */
 router.get('/lookup/:ticker', async (req, res) => {
   const ticker = req.params.ticker.toUpperCase().trim();
@@ -96,64 +106,43 @@ router.get('/lookup/:ticker', async (req, res) => {
 
 /**
  * GET /api/stocks/sentiment
- * Returns AI-powered sentiment analysis for all tech stocks
- * Uses S3 caching to reduce API costs and rate limits
+ * Returns cached sentiment analysis
  */
 router.get('/sentiment', async (req, res) => {
   try {
     console.log('Fetching sentiment data...');
-    
-    // Try to get cached version from S3
+
     const cached = await getFromS3(SENTIMENT_CACHE_KEY);
-    
+
     if (cached) {
-      // Check if cache is still fresh
       const cacheAge = Date.now() - new Date(cached.timestamp).getTime();
       const maxAge = CACHE_DURATION_HOURS * 60 * 60 * 1000;
-      
+
       if (cacheAge < maxAge) {
         console.log(`✓ Using cached sentiment (${Math.round(cacheAge / 60000)} minutes old)`);
         return res.json({
           ...cached,
           fromCache: true,
-          cacheAge: Math.round(cacheAge / 60000) // minutes
+          cacheAge: Math.round(cacheAge / 60000)
         });
-      } else {
-        console.log('○ Sentiment cache expired, analyzing fresh data...');
       }
-    } else {
-      console.log('○ No sentiment cache found, analyzing...');
     }
-    
-    // Calculate fresh sentiment data
-    // This is expensive: 10 stocks × NewsAPI × Claude API
-    console.log('Analyzing sentiment for all stocks (this may take 20-30 seconds)...');
-    
-    const sentiments = await Promise.all(
-      ALL_STOCKS.map(ticker => getStockSentiment(ticker))
-    );
-    
-    const result = {
-      sentiments,
-      timestamp: new Date().toISOString()
-    };
-    
-    // Save to S3 for next time
-    await saveToS3(SENTIMENT_CACHE_KEY, result);
-    console.log(`✓ Saved sentiment to cache, valid for ${CACHE_DURATION_HOURS} hours`);
-    
+
+    // For now, return empty if no cache (sentiment is expensive)
+    // You can implement real sentiment later
+    console.log('No valid sentiment cache, returning empty');
     res.json({
-      ...result,
+      sentiments: [],
+      timestamp: new Date().toISOString(),
       fromCache: false
     });
-    
+
   } catch (error) {
     console.error('Error in /stocks/sentiment:', error);
     res.status(500).json({
       error: {
         code: 'SENTIMENT_ERROR',
-        message: 'Failed to analyze sentiment',
-        details: error.message
+        message: 'Failed to fetch sentiment'
       }
     });
   }
@@ -161,30 +150,19 @@ router.get('/sentiment', async (req, res) => {
 
 /**
  * POST /api/stocks/sentiment/refresh
- * Force refresh sentiment analysis (ignores cache)
- * Useful for manual refresh button
+ * Force refresh sentiment (placeholder for now)
  */
 router.post('/sentiment/refresh', async (req, res) => {
   try {
-    console.log('Force refreshing sentiment analysis...');
-    
-    const sentiments = await Promise.all(
-      ALL_STOCKS.map(ticker => getStockSentiment(ticker))
-    );
-    
-    const result = {
-      sentiments,
-      timestamp: new Date().toISOString()
-    };
-    
-    await saveToS3(SENTIMENT_CACHE_KEY, result);
-    
+    console.log('Sentiment refresh requested (not implemented yet)');
+
     res.json({
-      ...result,
+      sentiments: [],
+      timestamp: new Date().toISOString(),
       fromCache: false,
       refreshed: true
     });
-    
+
   } catch (error) {
     console.error('Error refreshing sentiment:', error);
     res.status(500).json({

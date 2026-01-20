@@ -1,26 +1,14 @@
 const axios = require('axios');
 
-// Diversified stock list across multiple sectors
-const STOCKS = {
-  // Technology
-  tech: ["AAPL", "GOOGL", "NVDA", "MSFT", "AMZN", "META", "TSLA", "AMD"],
-  // Energy
-  energy: ["XOM", "CVX", "COP", "SLB", "OXY"],
-  // Finance
-  finance: ["JPM", "BAC", "GS", "V", "MA"],
-  // Healthcare
-  healthcare: ["JNJ", "PFE", "UNH", "MRK", "ABBV"],
-  // Consumer
-  consumer: ["WMT", "KO", "PEP", "MCD", "NKE"],
-};
+// Default stocks (used if no tickers provided)
+const DEFAULT_STOCKS = ['AAPL', 'NVDA', 'GOOGL', 'MSFT', 'AMZN', 'META', 'TSLA'];
 
-// Flatten all stocks into single array
-const ALL_STOCKS = Object.values(STOCKS).flat();
-
-async function getCurrentPrices() {
+async function getCurrentPrices(tickers = DEFAULT_STOCKS) {
   try {
+    console.log(`Fetching prices for ${tickers.length} stocks:`, tickers);
+
     const results = await Promise.all(
-      ALL_STOCKS.map(async (ticker) => {
+      tickers.map(async (ticker) => {
         try {
           const response = await axios.get(
             `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}`,
@@ -34,36 +22,22 @@ async function getCurrentPrices() {
             price: meta.regularMarketPrice,
             previousClose: meta.chartPreviousClose,
             change: meta.regularMarketPrice - meta.chartPreviousClose,
-            changePercent: ((meta.regularMarketPrice - meta.chartPreviousClose) / meta.chartPreviousClose) * 100,
-            sector: getSector(ticker)
+            changePercent: ((meta.regularMarketPrice - meta.chartPreviousClose) / meta.chartPreviousClose) * 100
           };
         } catch (err) {
           console.error(`Failed to fetch ${ticker}:`, err.message);
-          // Return mock data if fetch fails
-          return {
-            ticker: ticker,
-            price: 100 + Math.random() * 200,
-            previousClose: 100 + Math.random() * 200,
-            change: (Math.random() - 0.5) * 10,
-            changePercent: (Math.random() - 0.5) * 5,
-            sector: getSector(ticker)
-          };
+          return null;
         }
       })
     );
 
-    return results;
+    // Filter out failed fetches
+    return results.filter(r => r !== null);
+
   } catch (error) {
     console.error('Error fetching stock data:', error);
     throw error;
   }
 }
 
-function getSector(ticker) {
-  for (const [sector, tickers] of Object.entries(STOCKS)) {
-    if (tickers.includes(ticker)) return sector;
-  }
-  return 'unknown';
-}
-
-module.exports = { getCurrentPrices, ALL_STOCKS, STOCKS };
+module.exports = { getCurrentPrices, DEFAULT_STOCKS };

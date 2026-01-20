@@ -52,12 +52,20 @@ export const api = {
   }),
   getImageUrl: () => authFetch('/profile-image/url'),
 
-  // Stocks
-  getStocks: () => publicFetch('/stocks'),
+  // Stocks - now accepts tickers array
+  getStocks: (tickers) => {
+    if (tickers && tickers.length > 0) {
+      const tickersParam = tickers.join(',');
+      return publicFetch(`/stocks?tickers=${encodeURIComponent(tickersParam)}`);
+    }
+    return publicFetch('/stocks');
+  },
+
   getStockSentiment: () => publicFetch('/stocks/sentiment'),
+
   lookupTicker: (ticker) => publicFetch(`/stocks/lookup/${encodeURIComponent(ticker)}`),
 
-  // Correlations - now takes tickers array
+  // Correlations - accepts tickers array
   getCorrelations: (tickers) => {
     if (!tickers || tickers.length < 2) {
       return Promise.resolve({ stocks: [], edges: [], calculatedAt: new Date().toISOString() });

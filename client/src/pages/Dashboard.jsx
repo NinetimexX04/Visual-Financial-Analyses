@@ -84,33 +84,44 @@ function Dashboard() {
     }
   };
 
+  // Main data loading function
   const loadData = async () => {
     try {
       setLoading(true);
+      setError('');
 
-      // Load watchlists first so we know which tickers to fetch
-      const [stocksData, watchlistsData] = await Promise.all([
-        api.getStocks(),
-        api.getWatchlists().catch(() => ({ watchlists: DEFAULT_WATCHLISTS, activeWatchlist: 'Default' }))
-      ]);
+      // Step 1: Load watchlists FIRST (so we know which tickers to fetch)
+      const watchlistsData = await api.getWatchlists().catch(() => ({
+        watchlists: DEFAULT_WATCHLISTS,
+        activeWatchlist: 'Default'
+      }));
 
       const loadedWatchlists = watchlistsData.watchlists || DEFAULT_WATCHLISTS;
       const loadedActiveWatchlist = watchlistsData.activeWatchlist || 'Default';
       const tickers = loadedWatchlists[loadedActiveWatchlist] || [];
 
-      setStocks(stocksData.stocks);
       setWatchlists(loadedWatchlists);
       setActiveWatchlist(loadedActiveWatchlist);
 
-      // Fetch correlations for the active watchlist
-      if (tickers.length >= 2) {
-        const correlationsData = await api.getCorrelations(tickers);
+      // Step 2: Fetch stocks and correlations for those tickers
+      if (tickers.length > 0) {
+        const [stocksData, correlationsData] = await Promise.all([
+          api.getStocks(tickers),
+          tickers.length >= 2
+            ? api.getCorrelations(tickers)
+            : Promise.resolve({ stocks: [], edges: [], calculatedAt: new Date().toISOString() })
+        ]);
+
+        setStocks(stocksData.stocks);
         setCorrelations(correlationsData);
       } else {
+        setStocks([]);
         setCorrelations({ stocks: [], edges: [], calculatedAt: new Date().toISOString() });
       }
 
       setCorrelationsStale(false);
+
+      // Step 3: Load sentiment (separate, non-blocking)
       loadSentiment();
 
     } catch (err) {
@@ -127,9 +138,11 @@ function Dashboard() {
       const data = await api.getStockSentiment();
 
       const sentimentMap = {};
-      data.sentiments.forEach(s => {
-        sentimentMap[s.ticker] = s;
-      });
+      if (data.sentiments) {
+        data.sentiments.forEach(s => {
+          sentimentMap[s.ticker] = s;
+        });
+      }
 
       setSentiments(sentimentMap);
     } catch (err) {
@@ -139,7 +152,7 @@ function Dashboard() {
     }
   };
 
-  // Refresh just correlations (when watchlist changes)
+  // Refresh correlations only (when user clicks "Update Graph")
   const refreshCorrelations = async () => {
     if (currentWatchlist.length < 2) {
       setCorrelations({ stocks: [], edges: [], calculatedAt: new Date().toISOString() });
@@ -149,7 +162,13 @@ function Dashboard() {
 
     setCorrelationsLoading(true);
     try {
-      const correlationsData = await api.getCorrelations(currentWatchlist);
+      // Fetch both stocks and correlations for current watchlist
+      const [stocksData, correlationsData] = await Promise.all([
+        api.getStocks(currentWatchlist),
+        api.getCorrelations(currentWatchlist)
+      ]);
+
+      setStocks(stocksData.stocks);
       setCorrelations(correlationsData);
       setCorrelationsStale(false);
     } catch (err) {
@@ -456,7 +475,7 @@ function Dashboard() {
               <div>
                 <h2 className="text-base font-semibold text-gray-900">Stock Correlation Network</h2>
                 <p className="text-gray-500 text-xs">
-                  {correlations?.fromCache ? 'Cached' : 'Fresh'} • Updated {new Date(correlations?.calculatedAt).toLocaleString()}
+                  {correlations?.fromCache ? 'Cached' : 'Fresh'} • Updated {correlations?.calculatedAt ? new Date(correlations.calculatedAt).toLocaleString() : 'N/A'}
                 </p>
               </div>
               <div className="flex items-center gap-3">
@@ -467,7 +486,7 @@ function Dashboard() {
                   Center View
                 </button>
                 <span className="text-gray-500 text-xs">
-                  {correlations?.edges.length || 0} connections
+                  {correlations?.edges?.length || 0} connections
                 </span>
               </div>
             </div>
@@ -476,7 +495,7 @@ function Dashboard() {
             {correlationsStale && (
               <div className="mb-3 flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">
                 <span className="text-amber-800 text-sm">
-                  Watchlist changed — graph may be outdated
+                  Watchlist changed — click to update graph
                 </span>
                 <button
                   onClick={refreshCorrelations}
@@ -496,7 +515,7 @@ function Dashboard() {
             )}
 
             {/* Not enough tickers warning */}
-            {currentWatchlist.length < 2 && (
+            {currentWatchlist.length < 2 && !correlationsStale && (
               <div className="mb-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
                 <span className="text-blue-800 text-sm">
                   Add at least 2 tickers to your watchlist to see correlations
@@ -505,10 +524,10 @@ function Dashboard() {
             )}
 
             {/* Top Correlations */}
-            {correlations?.edges.length > 0 && (
+            {correlations?.edges?.length > 0 && (
               <div className="mb-3 flex gap-2 flex-wrap items-center">
                 <span className="text-gray-500 text-xs">Strongest:</span>
-                {correlations.edges
+                {[...correlations.edges]
                   .sort((a, b) => b.correlation - a.correlation)
                   .slice(0, 3)
                   .map(edge => (
@@ -625,36 +644,40 @@ function Dashboard() {
             {/* Live Prices */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
               <h2 className="text-base font-semibold text-gray-900 mb-3">Live Prices</h2>
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                {stocks.map(stock => {
-                  const sentiment = sentiments[stock.ticker];
-                  const showPulse = shouldGlow(sentiment);
+              {stocks.length > 0 ? (
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                  {stocks.map(stock => {
+                    const sentiment = sentiments[stock.ticker];
+                    const showPulse = shouldGlow(sentiment);
 
-                  return (
-                    <div
-                      key={stock.ticker}
-                      className={`p-2 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors border border-gray-100 ${showPulse ? 'animate-pulse' : ''}`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1">
-                          <span className="text-gray-900 font-medium text-xs">{stock.ticker}</span>
-                          {sentiment && (
-                            <span
-                              className="w-1.5 h-1.5 rounded-full"
-                              style={{ backgroundColor: getNodeColor(sentiment) }}
-                              title={sentiment.summary}
-                            />
-                          )}
+                    return (
+                      <div
+                        key={stock.ticker}
+                        className={`p-2 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors border border-gray-100 ${showPulse ? 'animate-pulse' : ''}`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1">
+                            <span className="text-gray-900 font-medium text-xs">{stock.ticker}</span>
+                            {sentiment && (
+                              <span
+                                className="w-1.5 h-1.5 rounded-full"
+                                style={{ backgroundColor: getNodeColor(sentiment) }}
+                                title={sentiment.summary}
+                              />
+                            )}
+                          </div>
+                          <div className={`text-xs font-medium ${stock.change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {stock.change >= 0 ? '+' : ''}{stock.changePercent.toFixed(1)}%
+                          </div>
                         </div>
-                        <div className={`text-xs font-medium ${stock.change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {stock.change >= 0 ? '+' : ''}{stock.changePercent.toFixed(1)}%
-                        </div>
+                        <div className="text-gray-500 text-xs mt-0.5">${stock.price.toFixed(2)}</div>
                       </div>
-                      <div className="text-gray-500 text-xs mt-0.5">${stock.price.toFixed(2)}</div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-gray-500 text-sm">No stocks in watchlist</p>
+              )}
             </div>
 
             {/* Watchlists */}
@@ -800,7 +823,7 @@ function Dashboard() {
                               </span>
                             </>
                           ) : (
-                            <span className="text-gray-400 text-xs">Not in dataset</span>
+                            <span className="text-gray-400 text-xs">Loading...</span>
                           )}
                         </div>
                       </div>
