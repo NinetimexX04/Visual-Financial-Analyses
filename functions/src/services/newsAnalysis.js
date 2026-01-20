@@ -1,152 +1,121 @@
 const Anthropic = require('@anthropic-ai/sdk');
+const axios = require('axios');
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const NEWS_API_KEY = process.env.NEWS_API_KEY;
 
 const anthropic = new Anthropic({
   apiKey: ANTHROPIC_API_KEY
 });
 
-// Stocks that will always have dramatic news for demo purposes
-const DEMO_DRAMATIC_STOCKS = {
-  // Very positive - breakthrough news
-  'NVDA': 'very_positive',
-  'TSLA': 'very_positive',
-  'XOM': 'very_positive',
-  // Very negative - crisis news
-  'META': 'very_negative',
-  'PFE': 'very_negative',
-  'BAC': 'very_negative',
-};
-
 /**
- * Generate realistic mock news based on recent stock performance
- * This simulates what NewsAPI would return
+ * Get company name from Yahoo Finance
  */
-function generateMockNews(ticker, priceChange) {
-  // Check if this is a demo stock with forced sentiment
-  const forcedSentiment = DEMO_DRAMATIC_STOCKS[ticker];
-
-  const newsTemplates = {
-    very_positive: [
-      `BREAKING: ${ticker} announces revolutionary breakthrough, stock soars in after-hours trading`,
-      `${ticker} reports record-shattering earnings, beats estimates by 40%`,
-      `Major institutional investors pile into ${ticker} amid historic growth`,
-      `${ticker} secures massive $50B government contract, analysts call it "game-changing"`,
-      `FDA grants ${ticker} fast-track approval for blockbuster treatment`,
-      `${ticker} CEO announces industry-disrupting AI partnership with unprecedented potential`
-    ],
-    very_negative: [
-      `BREAKING: ${ticker} faces federal investigation, executives subpoenaed`,
-      `${ticker} announces massive layoffs amid catastrophic revenue decline`,
-      `Class action lawsuit filed against ${ticker} for alleged fraud`,
-      `${ticker} loses major contract worth billions, stock in freefall`,
-      `Whistleblower reveals serious safety concerns at ${ticker} facilities`,
-      `${ticker} credit rating downgraded to junk status by major agencies`
-    ],
-    positive: [
-      `${ticker} announces strong quarterly earnings, beating analyst expectations`,
-      `Analysts upgrade ${ticker} to 'buy' rating on improved fundamentals`,
-      `${ticker} unveils new product line, shares surge on innovation`,
-      `Institutional investors increase stake in ${ticker} amid growth prospects`,
-      `${ticker} expands into new markets, revenue growth accelerates`
-    ],
-    negative: [
-      `${ticker} faces regulatory scrutiny, shares decline on uncertainty`,
-      `Analysts downgrade ${ticker} citing increased competition`,
-      `${ticker} misses revenue targets, CEO addresses investor concerns`,
-      `Market volatility impacts ${ticker} performance this quarter`,
-      `${ticker} reports supply chain challenges affecting margins`
-    ],
-    neutral: [
-      `${ticker} maintains steady performance in current market conditions`,
-      `Industry experts discuss ${ticker}'s position in competitive landscape`,
-      `${ticker} announces routine operational updates for investors`,
-      `Analysts maintain hold rating on ${ticker} pending market clarity`,
-      `${ticker} releases standard quarterly guidance in line with expectations`
-    ]
-  };
-
-  // Determine category - use forced sentiment for demo stocks
-  let category;
-  if (forcedSentiment) {
-    category = forcedSentiment;
-  } else if (priceChange > 4) {
-    category = 'very_positive';
-  } else if (priceChange < -4) {
-    category = 'very_negative';
-  } else if (priceChange > 1.5) {
-    category = 'positive';
-  } else if (priceChange < -1.5) {
-    category = 'negative';
-  } else {
-    category = 'neutral';
+async function getCompanyName(ticker) {
+  try {
+    const response = await axios.get(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}`,
+      { timeout: 5000 }
+    );
+    
+    const meta = response.data.chart.result?.[0]?.meta;
+    if (meta?.shortName) {
+      // Clean up the name (remove Inc., Corp., etc. for better search)
+      let name = meta.shortName;
+      name = name.replace(/,?\s*(Inc\.?|Corp\.?|Corporation|Ltd\.?|LLC|PLC|N\.?V\.?|S\.?A\.?)$/i, '');
+      return name.trim();
+    }
+    
+    return null;
+  } catch (error) {
+    console.error(`Failed to get company name for ${ticker}:`, error.message);
+    return null;
   }
-
-  const templates = newsTemplates[category];
-  const articles = [];
-
-  // Generate 3-5 mock articles
-  const numArticles = Math.floor(Math.random() * 3) + 3;
-  const usedTemplates = new Set();
-
-  for (let i = 0; i < numArticles; i++) {
-    let template;
-    do {
-      template = templates[Math.floor(Math.random() * templates.length)];
-    } while (usedTemplates.has(template) && usedTemplates.size < templates.length);
-    usedTemplates.add(template);
-
-    const sources = ['Bloomberg', 'Reuters', 'CNBC', 'Wall Street Journal', 'Financial Times', 'MarketWatch'];
-
-    articles.push({
-      title: template,
-      description: generateDescription(ticker, category),
-      source: sources[i % sources.length],
-      publishedAt: new Date(Date.now() - Math.random() * 12 * 60 * 60 * 1000).toISOString()
-    });
-  }
-
-  return articles;
-}
-
-function generateDescription(ticker, category) {
-  const descriptions = {
-    very_positive: [
-      `Markets react enthusiastically as ${ticker} delivers news that analysts are calling a major turning point for the company and potentially the entire sector.`,
-      `Investors are scrambling to increase positions as ${ticker} announces developments that could reshape its competitive position for years to come.`
-    ],
-    very_negative: [
-      `Shareholders express serious concern as ${ticker} faces challenges that analysts warn could have lasting implications for the company's future.`,
-      `Market watchers are closely monitoring the situation as ${ticker} navigates what some are calling a potential crisis point.`
-    ],
-    positive: [
-      `Market analysis suggests positive outlook for ${ticker} based on recent developments and improving fundamentals.`,
-      `Investors respond favorably to ${ticker} news, with analysts noting improved prospects ahead.`
-    ],
-    negative: [
-      `Analysts express caution regarding ${ticker} following recent developments that have raised concerns among investors.`,
-      `Market sentiment turns cautious on ${ticker} as traders assess potential headwinds.`
-    ],
-    neutral: [
-      `Market analysis suggests stable outlook for ${ticker} based on recent developments and trading patterns.`,
-      `${ticker} continues to trade within expected ranges as investors await further catalysts.`
-    ]
-  };
-
-  const options = descriptions[category];
-  return options[Math.floor(Math.random() * options.length)];
 }
 
 /**
- * Analyze sentiment using Claude API with mock news
+ * Fetch real news from NewsAPI
+ */
+async function fetchNews(ticker, companyName = null) {
+  if (!NEWS_API_KEY) {
+    console.warn('NEWS_API_KEY not set, using mock data');
+    return null;
+  }
+
+  try {
+    // Use provided company name or fall back to ticker
+    const searchTerm = companyName || ticker;
+    
+    console.log(`Searching news for: "${searchTerm} stock"`);
+    
+    const response = await axios.get('https://newsapi.org/v2/everything', {
+      params: {
+        q: `${searchTerm} stock`,
+        language: 'en',
+        sortBy: 'publishedAt',
+        pageSize: 5,
+        apiKey: NEWS_API_KEY
+      },
+      timeout: 10000
+    });
+
+    if (response.data.articles && response.data.articles.length > 0) {
+      console.log(`✓ Found ${response.data.articles.length} articles for ${ticker}`);
+      return response.data.articles.map(article => ({
+        title: article.title || '',
+        description: article.description || '',
+        source: article.source?.name || 'Unknown',
+        publishedAt: article.publishedAt,
+        url: article.url
+      }));
+    }
+
+    console.log(`○ No articles found for ${ticker}`);
+    return [];
+
+  } catch (error) {
+    console.error(`NewsAPI error for ${ticker}:`, error.message);
+    
+    if (error.response?.status === 401) {
+      console.error('Invalid NEWS_API_KEY');
+    } else if (error.response?.status === 429) {
+      console.error('NewsAPI rate limit exceeded');
+    }
+    
+    return null;
+  }
+}
+
+/**
+ * Generate mock news as fallback when NewsAPI fails or isn't configured
+ */
+function generateMockNews(ticker) {
+  const templates = [
+    `${ticker} shares trade mixed amid broader market movements`,
+    `Analysts maintain current outlook on ${ticker} stock`,
+    `${ticker} continues to track sector performance`,
+    `Investors watch ${ticker} ahead of upcoming earnings`,
+    `${ticker} holds steady in current trading session`
+  ];
+
+  return templates.slice(0, 3).map((title, i) => ({
+    title,
+    description: `Market update regarding ${ticker} stock performance and investor sentiment.`,
+    source: ['Reuters', 'Bloomberg', 'MarketWatch'][i],
+    publishedAt: new Date(Date.now() - i * 3600000).toISOString()
+  }));
+}
+
+/**
+ * Analyze sentiment using Claude API
  */
 async function analyzeSentiment(ticker, newsArticles) {
-  if (newsArticles.length === 0) {
+  if (!newsArticles || newsArticles.length === 0) {
     return {
       sentiment: 'neutral',
-      confidence: 0,
+      confidence: 30,
       summary: 'No recent news available',
-      reasoning: 'No articles found in the last 24 hours'
+      reasoning: 'No articles found'
     };
   }
 
@@ -168,12 +137,10 @@ Analyze the following news articles and determine:
 4. Reasoning: Why did you choose this sentiment?
 
 Guidelines:
-- very_positive: Major breakthrough, exceptional earnings, game-changing announcement - use 75-95 confidence
-- very_negative: Major scandal, huge losses, regulatory crisis, leadership crisis - use 75-95 confidence
-- positive/negative: Good/bad news but not extraordinary - use 60-80 confidence
-- neutral: Mixed news or routine updates - use 40-70 confidence
-
-IMPORTANT: If the news contains words like "BREAKING", "record-shattering", "revolutionary", "crisis", "investigation", "fraud", or "catastrophic" - these are STRONG signals for very_positive or very_negative sentiment with HIGH confidence (80+).
+- very_positive: Major breakthrough, exceptional earnings, game-changing announcement (75-95 confidence)
+- very_negative: Major scandal, huge losses, regulatory crisis (75-95 confidence)
+- positive/negative: Good/bad news but not extraordinary (60-80 confidence)
+- neutral: Mixed news or routine updates (40-70 confidence)
 
 Recent news articles:
 ${newsText}
@@ -198,7 +165,7 @@ Respond ONLY with valid JSON in this exact format:
 
     const responseText = message.content[0].text;
 
-    // Try to parse JSON (handle potential markdown code blocks)
+    // Parse JSON (handle potential markdown code blocks)
     let jsonText = responseText;
     if (responseText.includes('```json')) {
       jsonText = responseText.split('```json')[1].split('```')[0].trim();
@@ -216,43 +183,41 @@ Respond ONLY with valid JSON in this exact format:
 
   } catch (error) {
     console.error(`Claude analysis error for ${ticker}:`, error.message);
-
-    // Fallback: return sentiment based on demo stock list
-    const forcedSentiment = DEMO_DRAMATIC_STOCKS[ticker];
-    if (forcedSentiment) {
-      return {
-        sentiment: forcedSentiment,
-        confidence: 85,
-        summary: forcedSentiment === 'very_positive'
-          ? `Major positive developments reported for ${ticker}`
-          : `Significant concerns emerging for ${ticker}`,
-        reasoning: 'Based on recent breaking news reports'
-      };
-    }
-
+    
     return {
       sentiment: 'neutral',
-      confidence: 50,
-      summary: 'Analysis pending',
-      reasoning: 'Unable to complete full analysis'
+      confidence: 40,
+      summary: 'Unable to analyze sentiment',
+      reasoning: 'Analysis error occurred'
     };
   }
 }
 
 /**
  * Get complete sentiment analysis for a stock
- * Uses mock news + real Claude AI analysis
  */
-async function getStockSentiment(ticker, stockData = null) {
+async function getStockSentiment(ticker) {
   console.log(`Analyzing sentiment for ${ticker}...`);
 
-  // Use actual price change if provided, otherwise random
-  const priceChange = stockData?.changePercent || (Math.random() * 10 - 5);
+  // Get company name dynamically from Yahoo Finance
+  const companyName = await getCompanyName(ticker);
+  console.log(`Company name for ${ticker}: ${companyName || 'not found, using ticker'}`);
 
-  // Generate realistic mock news based on price movement
-  const news = generateMockNews(ticker, priceChange);
+  // Try real news first, fallback to mock
+  let news = await fetchNews(ticker, companyName);
+  let usingMockData = false;
 
-  // Use real Claude AI to analyze the mock news
+  if (news === null) {
+    console.log(`Using mock news for ${ticker}`);
+    news = generateMockNews(ticker);
+    usingMockData = true;
+  } else if (news.length === 0) {
+    console.log(`No news found for ${ticker}, using mock`);
+    news = generateMockNews(ticker);
+    usingMockData = true;
+  }
+
+  // Analyze with Claude
   const analysis = await analyzeSentiment(ticker, news);
 
   return {
@@ -262,12 +227,15 @@ async function getStockSentiment(ticker, stockData = null) {
     summary: analysis.summary,
     reasoning: analysis.reasoning || '',
     newsCount: news.length,
-    analyzedAt: new Date().toISOString(),
-    priceChange: priceChange
+    usingMockData,
+    companyName: companyName || ticker,
+    analyzedAt: new Date().toISOString()
   };
 }
 
 module.exports = {
+  getCompanyName,
+  fetchNews,
   analyzeSentiment,
   getStockSentiment
 };

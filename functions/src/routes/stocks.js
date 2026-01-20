@@ -4,7 +4,6 @@ const { getCurrentPrices, DEFAULT_STOCKS } = require('../services/stockData');
 const { getStockSentiment } = require('../services/newsAnalysis');
 const { getFromS3, saveToS3 } = require('../services/s3');
 
-const SENTIMENT_CACHE_KEY = 'sentiment/analysis.json';
 const CACHE_DURATION_HOURS = 4;
 
 /**
@@ -13,7 +12,6 @@ const CACHE_DURATION_HOURS = 4;
  */
 router.get('/', async (req, res) => {
   try {
-    // Get tickers from query param, fallback to defaults
     const tickersParam = req.query.tickers;
     const tickers = tickersParam
       ? tickersParam.split(',').map(t => t.trim().toUpperCase())
@@ -106,13 +104,25 @@ router.get('/lookup/:ticker', async (req, res) => {
 
 /**
  * GET /api/stocks/sentiment
- * Returns cached sentiment analysis
+ * Returns AI-powered sentiment analysis for given tickers
+ * Uses S3 caching to reduce API costs
  */
 router.get('/sentiment', async (req, res) => {
   try {
     console.log('Fetching sentiment data...');
 
-    const cached = await getFromS3(SENTIMENT_CACHE_KEY);
+    // Get tickers from query param
+    const tickersParam = req.query.tickers;
+    const tickers = tickersParam
+      ? tickersParam.split(',').map(t => t.trim().toUpperCase())
+      : DEFAULT_STOCKS;
+
+    console.log(`Sentiment requested for: ${tickers.join(', ')}`);
+
+    // Create cache key based on sorted tickers
+    const cacheKey = `sentiment/${[...tickers].sort().join('-')}.json`;
+
+    const cached = await getFromS3(cacheKey);
 
     if (cached) {
       const cacheAge = Date.now() - new Date(cached.timestamp).getTime();
@@ -125,15 +135,31 @@ router.get('/sentiment', async (req, res) => {
           fromCache: true,
           cacheAge: Math.round(cacheAge / 60000)
         });
+      } else {
+        console.log('○ Sentiment cache expired, analyzing fresh...');
       }
+    } else {
+      console.log('○ No sentiment cache found, analyzing...');
     }
 
-    // For now, return empty if no cache (sentiment is expensive)
-    // You can implement real sentiment later
-    console.log('No valid sentiment cache, returning empty');
+    // Calculate fresh sentiment
+    console.log(`Analyzing sentiment for ${tickers.length} stocks (this may take a while)...`);
+
+    const sentiments = await Promise.all(
+      tickers.map(ticker => getStockSentiment(ticker))
+    );
+
+    const result = {
+      sentiments,
+      timestamp: new Date().toISOString()
+    };
+
+    // Save to S3 cache
+    await saveToS3(cacheKey, result);
+    console.log('✓ Saved sentiment to cache');
+
     res.json({
-      sentiments: [],
-      timestamp: new Date().toISOString(),
+      ...result,
       fromCache: false
     });
 
@@ -142,7 +168,8 @@ router.get('/sentiment', async (req, res) => {
     res.status(500).json({
       error: {
         code: 'SENTIMENT_ERROR',
-        message: 'Failed to fetch sentiment'
+        message: 'Failed to analyze sentiment',
+        details: error.message
       }
     });
   }
@@ -150,15 +177,38 @@ router.get('/sentiment', async (req, res) => {
 
 /**
  * POST /api/stocks/sentiment/refresh
- * Force refresh sentiment (placeholder for now)
+ * Force refresh sentiment analysis (ignores cache)
  */
 router.post('/sentiment/refresh', async (req, res) => {
   try {
-    console.log('Sentiment refresh requested (not implemented yet)');
+    const { tickers } = req.body;
+
+    if (!tickers || !Array.isArray(tickers) || tickers.length === 0) {
+      return res.status(400).json({
+        error: {
+          code: 'INVALID_TICKERS',
+          message: 'Please provide an array of tickers'
+        }
+      });
+    }
+
+    console.log(`Force refreshing sentiment for: ${tickers.join(', ')}`);
+
+    const sentiments = await Promise.all(
+      tickers.map(ticker => getStockSentiment(ticker))
+    );
+
+    const result = {
+      sentiments,
+      timestamp: new Date().toISOString()
+    };
+
+    // Save to S3 cache
+    const cacheKey = `sentiment/${[...tickers].sort().join('-')}.json`;
+    await saveToS3(cacheKey, result);
 
     res.json({
-      sentiments: [],
-      timestamp: new Date().toISOString(),
+      ...result,
       fromCache: false,
       refreshed: true
     });

@@ -52,7 +52,7 @@ export const api = {
   }),
   getImageUrl: () => authFetch('/profile-image/url'),
 
-  // Stocks - now accepts tickers array
+  // Stocks - accepts tickers array
   getStocks: (tickers) => {
     if (tickers && tickers.length > 0) {
       const tickersParam = tickers.join(',');
@@ -61,7 +61,14 @@ export const api = {
     return publicFetch('/stocks');
   },
 
-  getStockSentiment: () => publicFetch('/stocks/sentiment'),
+  // Sentiment - accepts tickers array
+  getStockSentiment: (tickers) => {
+    if (tickers && tickers.length > 0) {
+      const tickersParam = tickers.join(',');
+      return publicFetch(`/stocks/sentiment?tickers=${encodeURIComponent(tickersParam)}`);
+    }
+    return publicFetch('/stocks/sentiment');
+  },
 
   lookupTicker: (ticker) => publicFetch(`/stocks/lookup/${encodeURIComponent(ticker)}`),
 
@@ -82,8 +89,14 @@ export const api = {
     }).then(r => r.json());
   },
 
-  // Sentiment refresh
-  refreshSentiment: () => fetch(`${API_BASE}/stocks/sentiment/refresh`, { method: 'POST' }).then(r => r.json()),
+  // Sentiment refresh - accepts tickers array
+  refreshSentiment: (tickers) => {
+    return fetch(`${API_BASE}/stocks/sentiment/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tickers })
+    }).then(r => r.json());
+  },
 
   // Watchlists
   getWatchlists: () => authFetch('/watchlist'),

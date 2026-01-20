@@ -90,13 +90,11 @@ function Dashboard() {
     }
   };
 
-  // Main data loading function
   const loadData = async () => {
     try {
       setLoading(true);
       setError('');
 
-      // Step 1: Load watchlists FIRST (so we know which tickers to fetch)
       const watchlistsData = await api.getWatchlists().catch(() => ({
         watchlists: DEFAULT_WATCHLISTS,
         activeWatchlist: 'Default'
@@ -109,7 +107,6 @@ function Dashboard() {
       setWatchlists(loadedWatchlists);
       setActiveWatchlist(loadedActiveWatchlist);
 
-      // Step 2: Fetch stocks and correlations for those tickers
       if (tickers.length > 0) {
         const [stocksData, correlationsData] = await Promise.all([
           api.getStocks(tickers),
@@ -127,8 +124,8 @@ function Dashboard() {
 
       setCorrelationsStale(false);
 
-      // Step 3: Load sentiment (separate, non-blocking)
-      loadSentiment();
+      // Pass tickers directly!
+      loadSentiment(tickers);
 
     } catch (err) {
       console.error('Failed to load data:', err);
@@ -138,10 +135,15 @@ function Dashboard() {
     }
   };
 
-  const loadSentiment = async () => {
+  const loadSentiment = async (tickers) => {
+    if (!tickers || tickers.length === 0) {
+      setSentiments({});
+      return;
+    }
+
     try {
       setSentimentLoading(true);
-      const data = await api.getStockSentiment();
+      const data = await api.getStockSentiment(tickers);
 
       const sentimentMap = {};
       if (data.sentiments) {
@@ -185,13 +187,12 @@ function Dashboard() {
     }
   };
 
-  // Force refresh everything (bypasses cache)
   const forceRefreshAll = async () => {
     setLoading(true);
     try {
       await Promise.all([
         api.refreshCorrelations(currentWatchlist),
-        api.refreshSentiment()
+        api.refreshSentiment(currentWatchlist)
       ]);
       window.location.reload();
     } catch (err) {
