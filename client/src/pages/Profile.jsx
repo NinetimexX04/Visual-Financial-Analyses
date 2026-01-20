@@ -17,7 +17,7 @@ function Profile() {
   // Form state
   const [displayName, setDisplayName] = useState('');
   const [phone, setPhone] = useState('');
-  const [role, setRole] = useState('Parent');
+  const [role, setRole] = useState('Investor');
 
   useEffect(() => {
     loadProfile();
@@ -36,7 +36,7 @@ function Profile() {
       setProfile(data);
       setDisplayName(data.displayName || '');
       setPhone(data.phone || '');
-      setRole(data.role || 'Parent');
+      setRole(data.role || 'Investor');
       if (data.profileImageKey) {
         loadProfileImage();
       }
@@ -304,9 +304,9 @@ function Profile() {
                   onChange={(e) => setRole(e.target.value)}
                   className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm"
                 >
-                  <option value="Parent">Parent</option>
-                  <option value="Educator">Educator</option>
-                  <option value="Admin">Admin</option>
+                  <option value="Investor">Investor</option>
+                  <option value="Analyst">Analyst</option>
+                  <option value="Trader">Trader</option>
                 </select>
               </div>
 

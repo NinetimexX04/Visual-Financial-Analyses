@@ -175,6 +175,26 @@ router.get('/sentiment', async (req, res) => {
   }
 });
 
+router.get('/history/:ticker', async (req, res) => {
+  try {
+    const ticker = req.params.ticker.toUpperCase();
+    const { getHistoricalPrices } = require('../services/correlations');
+    
+    const prices = await getHistoricalPrices(ticker, 365);
+    
+    res.json({
+      ticker,
+      prices,
+      days: 365
+    });
+  } catch (error) {
+    console.error(`Error fetching history for ${ticker}:`, error);
+    res.status(500).json({
+      error: { code: 'HISTORY_ERROR', message: 'Failed to fetch price history' }
+    });
+  }
+});
+
 /**
  * POST /api/stocks/sentiment/refresh
  * Force refresh sentiment analysis (ignores cache)

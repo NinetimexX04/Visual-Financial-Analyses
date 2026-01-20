@@ -71,6 +71,7 @@ export const api = {
   },
 
   lookupTicker: (ticker) => publicFetch(`/stocks/lookup/${encodeURIComponent(ticker)}`),
+  getStockHistory: (ticker) => publicFetch(`/stocks/history/${encodeURIComponent(ticker)}`),
 
   // Correlations - accepts tickers array
   getCorrelations: (tickers) => {

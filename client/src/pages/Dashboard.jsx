@@ -4,7 +4,7 @@ import { auth } from '../firebase';
 import { api } from '../api';
 import ForceGraph2D from 'react-force-graph-2d';
 import * as d3 from 'd3-force';
-
+import { LineChart, Line, ResponsiveContainer, Tooltip } from 'recharts';
 
 const DEFAULT_WATCHLISTS = {
   'Default': ['AAPL', 'NVDA', 'GOOGL', 'XOM', 'JPM', 'JNJ', 'WMT']
@@ -48,6 +48,10 @@ function Dashboard() {
   const [hoverNode, setHoverNode] = useState(null);
   const [highlightNodes, setHighlightNodes] = useState(new Set());
   const [highlightLinks, setHighlightLinks] = useState(new Set());
+
+  const [selectedTicker, setSelectedTicker] = useState(null);
+  const [priceHistory, setPriceHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   // Update graph dimensions when container resizes
   useEffect(() => {
@@ -157,6 +161,20 @@ function Dashboard() {
       console.error('Failed to load sentiment:', err);
     } finally {
       setSentimentLoading(false);
+    }
+  };
+
+  const loadPriceHistory = async (ticker) => {
+    setSelectedTicker(ticker);
+    setHistoryLoading(true);
+    try {
+      const data = await api.getStockHistory(ticker);
+      setPriceHistory(data.prices.map((price, i) => ({ day: i, price })));
+    } catch (err) {
+      console.error('Failed to load history:', err);
+      setPriceHistory([]);
+    } finally {
+      setHistoryLoading(false);
     }
   };
 
@@ -477,12 +495,6 @@ function Dashboard() {
               <span className="text-base font-bold text-gray-900">StockViz</span>
             </div>
 
-            <div className="hidden md:flex items-center gap-6">
-              <a href="#" className="text-blue-600 font-medium text-sm">Dashboard</a>
-              <a href="#" className="text-gray-500 hover:text-gray-900 transition-colors text-sm">Markets</a>
-              <a href="#" className="text-gray-500 hover:text-gray-900 transition-colors text-sm">Analysis</a>
-            </div>
-
             <div className="flex items-center gap-2">
               {sentimentLoading && (
                 <span className="text-xs text-blue-600 flex items-center gap-1">
@@ -542,7 +554,9 @@ function Dashboard() {
             {correlationsStale && (
               <div className="mb-3 flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">
                 <span className="text-amber-800 text-sm">
-                  Watchlist changed — click to update graph
+                  {currentWatchlist.length < 2 
+                    ? `Add ${2 - currentWatchlist.length} more ticker${currentWatchlist.length === 0 ? 's' : ''} to see correlations`
+                    : 'Watchlist changed — click to update graph'}
                 </span>
                 <button
                   onClick={refreshCorrelations}
@@ -603,7 +617,7 @@ function Dashboard() {
                       lines.push(`$${node.stock.price.toFixed(2)}`);
                       lines.push(`${node.stock.change >= 0 ? '+' : ''}${node.stock.changePercent.toFixed(2)}%`);
                     }
-                    if (node.sentiment && node.sentiment.confidence >= 70) {
+                    if (node.sentiment && node.sentiment.confidence >= 50) {
                       lines.push('');
                       lines.push(node.sentiment.summary);
                     }
@@ -711,8 +725,45 @@ function Dashboard() {
           <div className="grid lg:grid-cols-2 gap-4">
             {/* Live Prices */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-              <h2 className="text-base font-semibold text-gray-900 mb-3">Live Prices</h2>
-              {stocks.length > 0 ? (
+              <h2 className="text-base font-semibold text-gray-900 mb-3">
+                {selectedTicker ? `${selectedTicker} - 1 Year History` : 'Live Prices'}
+              </h2>
+              
+              {selectedTicker && (
+                <div className="mb-4">
+                  {historyLoading ? (
+                    <div className="h-32 flex items-center justify-center">
+                      <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                    </div>
+                  ) : (
+                    <div className="h-32">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={priceHistory}>
+                          <Tooltip 
+                            formatter={(value) => [`$${value.toFixed(2)}`, 'Price']}
+                            labelFormatter={(day) => `Day ${day + 1}`}
+                          />
+                          <Line 
+                            type="monotone" 
+                            dataKey="price" 
+                            stroke="#2563eb" 
+                            strokeWidth={2} 
+                            dot={false} 
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                  <button
+                    onClick={() => setSelectedTicker(null)}
+                    className="text-xs text-gray-500 hover:text-gray-700 mt-2"
+                  >
+                    ← Back to all prices
+                  </button>
+                </div>
+              )}
+
+              {!selectedTicker && stocks.length > 0 ? (
                 <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                   {stocks.map(stock => {
                     const sentiment = sentiments[stock.ticker];
@@ -721,7 +772,8 @@ function Dashboard() {
                     return (
                       <div
                         key={stock.ticker}
-                        className={`p-2 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors border border-gray-100 ${showPulse ? 'animate-pulse' : ''}`}
+                        onClick={() => loadPriceHistory(stock.ticker)}
+                        className={`p-2 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors border border-gray-100 cursor-pointer ${showPulse ? 'animate-pulse' : ''}`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1">
@@ -743,7 +795,7 @@ function Dashboard() {
                     );
                   })}
                 </div>
-              ) : (
+              ) : !selectedTicker && (
                 <p className="text-gray-500 text-sm">No stocks in watchlist</p>
               )}
             </div>
@@ -862,7 +914,8 @@ function Dashboard() {
                     return (
                       <div
                         key={ticker}
-                        className="p-2 bg-blue-50 border border-blue-100 rounded-lg group"
+                        onClick={() => loadPriceHistory(ticker)}
+                        className={`p-2 border rounded-lg group cursor-pointer ${selectedTicker === ticker ? 'bg-blue-100 border-blue-300' : 'bg-blue-50 border-blue-100'}`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1">
