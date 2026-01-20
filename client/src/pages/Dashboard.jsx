@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { auth } from '../firebase';
 import { api } from '../api';
 import ForceGraph2D from 'react-force-graph-2d';
 import * as d3 from 'd3-force';
+
 
 const DEFAULT_WATCHLISTS = {
   'Default': ['AAPL', 'NVDA', 'GOOGL', 'XOM', 'JPM', 'JNJ', 'WMT']
@@ -42,6 +43,11 @@ function Dashboard() {
 
   // Derived state
   const currentWatchlist = watchlists[activeWatchlist] || [];
+
+  // Hover highlight state
+  const [hoverNode, setHoverNode] = useState(null);
+  const [highlightNodes, setHighlightNodes] = useState(new Set());
+  const [highlightLinks, setHighlightLinks] = useState(new Set());
 
   // Update graph dimensions when container resizes
   useEffect(() => {
@@ -357,8 +363,31 @@ function Dashboard() {
     return sizes;
   };
 
-  // Prepare graph data
-  const graphData = correlations ? (() => {
+  const handleNodeHover = (node) => {
+    if (!node) {
+      setHoverNode(null);
+      setHighlightNodes(new Set());
+      setHighlightLinks(new Set());
+      return;
+    }
+
+    const newHighlightNodes = new Set();
+    const newHighlightLinks = new Set();
+
+    // Store node IDs, not objects
+    newHighlightNodes.add(node.id);
+    node.neighbors?.forEach(neighbor => newHighlightNodes.add(neighbor.id));
+    node.links?.forEach(link => newHighlightLinks.add(`${link.source.id || link.source}-${link.target.id || link.target}`));
+
+    setHoverNode(node);
+    setHighlightNodes(newHighlightNodes);
+    setHighlightLinks(newHighlightLinks);
+  };
+
+  // Prepare graph data with neighbor references for highlighting
+  const graphData = useMemo(() => {
+    if (!correlations) return { nodes: [], links: [] };
+    
     const nodeSizes = calculateNodeSizes(correlations.edges, correlations.stocks);
 
     const connectionCounts = {};
@@ -370,38 +399,55 @@ function Dashboard() {
       connectionCounts[edge.target] = (connectionCounts[edge.target] || 0) + 1;
     });
 
-    return {
-      nodes: correlations.stocks.map(ticker => {
-        const stock = stocks.find(s => s.ticker === ticker);
-        const sentiment = sentiments[ticker];
+    const nodes = correlations.stocks.map(ticker => {
+      const stock = stocks.find(s => s.ticker === ticker);
+      const sentiment = sentiments[ticker];
 
-        return {
-          id: ticker,
-          name: ticker,
-          val: nodeSizes[ticker],
-          color: getNodeColor(sentiment),
-          sentiment: sentiment,
-          stock: stock,
-          glow: shouldGlow(sentiment),
-          connections: connectionCounts[ticker] || 0
-        };
-      }),
-      links: correlations.edges.map(edge => {
-        const sourceSize = nodeSizes[edge.source];
-        const targetSize = nodeSizes[edge.target];
-        const avgNodeSize = (sourceSize + targetSize) / 2;
-        const baseDistance = 200 * (1 - edge.correlation);
-        const sizeBuffer = Math.pow(avgNodeSize, 2) * 1.5;
+      return {
+        id: ticker,
+        name: ticker,
+        val: nodeSizes[ticker],
+        color: getNodeColor(sentiment),
+        sentiment: sentiment,
+        stock: stock,
+        glow: shouldGlow(sentiment),
+        connections: connectionCounts[ticker] || 0,
+        neighbors: new Set(),
+        links: new Set()
+      };
+    });
 
-        return {
-          source: edge.source,
-          target: edge.target,
-          value: edge.correlation,
-          distance: baseDistance + sizeBuffer,
-        };
-      })
-    };
-  })() : { nodes: [], links: [] };
+    const links = correlations.edges.map(edge => {
+      const sourceSize = nodeSizes[edge.source];
+      const targetSize = nodeSizes[edge.target];
+      const avgNodeSize = (sourceSize + targetSize) / 2;
+      const baseDistance = 200 * (1 - edge.correlation);
+      const sizeBuffer = Math.pow(avgNodeSize, 2) * 1.5;
+
+      return {
+        source: edge.source,
+        target: edge.target,
+        value: edge.correlation,
+        distance: baseDistance + sizeBuffer,
+      };
+    });
+
+    const nodeMap = new Map(nodes.map(node => [node.id, node]));
+    
+    links.forEach(link => {
+      const sourceNode = nodeMap.get(link.source);
+      const targetNode = nodeMap.get(link.target);
+      
+      if (sourceNode && targetNode) {
+        sourceNode.neighbors.add(targetNode);
+        targetNode.neighbors.add(sourceNode);
+        sourceNode.links.add(link);
+        targetNode.links.add(link);
+      }
+    });
+
+    return { nodes, links };
+  }, [correlations, stocks, sentiments]);
 
   // Loading screen
   if (loading) {
@@ -549,6 +595,7 @@ function Dashboard() {
                   graphData={graphData}
                   width={graphDimensions.width}
                   height={graphDimensions.height}
+                  onNodeHover={handleNodeHover}
                   nodeLabel={node => {
                     const lines = [node.id];
                     if (node.stock) {
@@ -567,8 +614,12 @@ function Dashboard() {
                   nodeCanvasObject={(node, ctx, globalScale) => {
                     const label = node.id;
                     const fontSize = (node.val * 0.8) / globalScale;
+                    
+                    // Check by ID instead of object reference
+                    const isDimmed = hoverNode && !highlightNodes.has(node.id);
+                    const opacity = isDimmed ? 0.2 : 1;
 
-                    if (node.glow) {
+                    if (node.glow && !isDimmed) {
                       ctx.beginPath();
                       ctx.arc(node.x, node.y, node.val + 8, 0, 2 * Math.PI);
                       ctx.fillStyle = node.color + '30';
@@ -585,20 +636,36 @@ function Dashboard() {
                       ctx.fill();
                     }
 
+                    // Draw main node with opacity
                     ctx.beginPath();
                     ctx.arc(node.x, node.y, node.val, 0, 2 * Math.PI);
-                    ctx.fillStyle = node.color;
+                    ctx.fillStyle = isDimmed 
+                      ? `rgba(100, 116, 139, ${opacity})`  // Dimmed gray
+                      : node.color;
                     ctx.fill();
 
+                    // Draw label with opacity
                     ctx.font = `bold ${fontSize}px Sans-Serif`;
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
-                    ctx.fillStyle = 'white';
+                    ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
                     ctx.fillText(label, node.x, node.y);
                   }}
-                  linkWidth={3}
+                  linkWidth={link => {
+                    const linkId = `${link.source.id || link.source}-${link.target.id || link.target}`;
+                    return highlightLinks.has(linkId) ? 4 : 2;
+                  }}
+                  linkColor={link => {
+                    const linkId = `${link.source.id || link.source}-${link.target.id || link.target}`;
+                    if (highlightLinks.has(linkId)) {
+                      return 'rgba(255, 255, 255, 0.9)';
+                    }
+                    if (hoverNode) {
+                      return 'rgba(148, 163, 184, 0.1)';
+                    }
+                    return 'rgba(148, 163, 184, 0.5)';
+                  }}
                   linkDistance={link => link.distance}
-                  linkColor={() => 'rgba(148, 163, 184, 0.5)'}
                   backgroundColor="#0f172a"
                   d3VelocityDecay={0.5}
                   d3AlphaDecay={0.02}
