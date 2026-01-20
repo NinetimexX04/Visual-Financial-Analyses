@@ -1,20 +1,15 @@
 import { auth } from './firebase';
 
-// Use direct Cloud Function URL
 const API_BASE = 'https://api-fjyzp7xsqq-uc.a.run.app';
 
-/**
- * Make authenticated API request
- */
 async function authFetch(endpoint, options = {}) {
   const user = auth.currentUser;
-  
   if (!user) {
     throw new Error('Not authenticated');
   }
-  
+
   const token = await user.getIdToken();
-  
+
   const response = await fetch(`${API_BASE}${endpoint}`, {
     ...options,
     headers: {
@@ -23,29 +18,23 @@ async function authFetch(endpoint, options = {}) {
       ...options.headers,
     },
   });
-  
+
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: { message: 'Request failed' } }));
     throw new Error(errorData.error?.message || `Request failed: ${response.status}`);
   }
-  
+
   return response.json();
 }
 
-/**
- * Make unauthenticated API request (for public endpoints)
- */
 async function publicFetch(endpoint) {
   const response = await fetch(`${API_BASE}${endpoint}`);
-  
   if (!response.ok) {
     throw new Error(`Request failed: ${response.status}`);
   }
-  
   return response.json();
 }
 
-// Profile API
 export const api = {
   // Profile
   bootstrap: () => authFetch('/bootstrap', { method: 'POST' }),
@@ -54,7 +43,7 @@ export const api = {
     method: 'PUT',
     body: JSON.stringify(data),
   }),
-  
+
   // Image Upload
   initImageUpload: () => authFetch('/profile-image/init', { method: 'POST' }),
   completeImageUpload: (objectKey) => authFetch('/profile-image/complete', {
@@ -62,20 +51,33 @@ export const api = {
     body: JSON.stringify({ objectKey }),
   }),
   getImageUrl: () => authFetch('/profile-image/url'),
-  
-  // Stocks (public - no auth required)
+
+  // Stocks
   getStocks: () => publicFetch('/stocks'),
   getStockSentiment: () => publicFetch('/stocks/sentiment'),
   lookupTicker: (ticker) => publicFetch(`/stocks/lookup/${encodeURIComponent(ticker)}`),
-  
-  // Correlations (public - no auth required)
-  getCorrelations: () => publicFetch('/correlations'),
-  refreshCorrelations: () => fetch(`${API_BASE}/correlations/refresh`, { method: 'POST' }).then(r => r.json()),
+
+  // Correlations - now takes tickers array
+  getCorrelations: (tickers) => {
+    if (!tickers || tickers.length < 2) {
+      return Promise.resolve({ stocks: [], edges: [], calculatedAt: new Date().toISOString() });
+    }
+    const tickersParam = tickers.join(',');
+    return publicFetch(`/correlations?tickers=${encodeURIComponent(tickersParam)}`);
+  },
+
+  refreshCorrelations: (tickers) => {
+    return fetch(`${API_BASE}/correlations/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tickers })
+    }).then(r => r.json());
+  },
 
   // Sentiment refresh
   refreshSentiment: () => fetch(`${API_BASE}/stocks/sentiment/refresh`, { method: 'POST' }).then(r => r.json()),
-  
-  // Watchlists (requires auth)
+
+  // Watchlists
   getWatchlists: () => authFetch('/watchlist'),
   saveWatchlists: (watchlists, activeWatchlist) => authFetch('/watchlist', {
     method: 'POST',

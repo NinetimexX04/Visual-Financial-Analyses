@@ -5,7 +5,6 @@ import { api } from '../api';
 import ForceGraph2D from 'react-force-graph-2d';
 import * as d3 from 'd3-force';
 
-// Default watchlists for new users
 const DEFAULT_WATCHLISTS = {
   'Default': ['AAPL', 'NVDA', 'GOOGL', 'XOM', 'JPM', 'JNJ', 'WMT']
 };
@@ -16,13 +15,18 @@ function Dashboard() {
   const [correlations, setCorrelations] = useState(null);
   const [sentiments, setSentiments] = useState({});
 
-  // Multiple watchlists support
+  // Watchlist state
   const [watchlists, setWatchlists] = useState(DEFAULT_WATCHLISTS);
   const [activeWatchlist, setActiveWatchlist] = useState('Default');
+  const [correlationsStale, setCorrelationsStale] = useState(false);
 
+  // Loading states
   const [loading, setLoading] = useState(true);
+  const [correlationsLoading, setCorrelationsLoading] = useState(false);
   const [sentimentLoading, setSentimentLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // Graph refs
   const graphRef = useRef();
   const containerRef = useRef();
   const [graphDimensions, setGraphDimensions] = useState({ width: 1000, height: 770 });
@@ -36,9 +40,8 @@ function Dashboard() {
   const [newWatchlistName, setNewWatchlistName] = useState('');
   const [showCreateWatchlist, setShowCreateWatchlist] = useState(false);
 
-  // Current watchlist (derived from watchlists and activeWatchlist)
+  // Derived state
   const currentWatchlist = watchlists[activeWatchlist] || [];
-
 
   // Update graph dimensions when container resizes
   useEffect(() => {
@@ -49,39 +52,35 @@ function Dashboard() {
       }
     };
 
-    // Small delay to ensure container is rendered
     setTimeout(updateDimensions, 100);
     window.addEventListener('resize', updateDimensions);
     return () => window.removeEventListener('resize', updateDimensions);
   }, [loading]);
 
+  // Initial data load
   useEffect(() => {
     loadData();
   }, []);
 
-  // Configure d3 forces for better spacing
+  // Configure d3 forces
   useEffect(() => {
     if (graphRef.current) {
-      // Charge force - larger nodes repel more strongly
       graphRef.current.d3Force('charge')
-        .strength(node => -300 - (node.val * 30)) // Bigger nodes = stronger repulsion
+        .strength(node => -300 - (node.val * 30))
         .distanceMax(200);
 
-      // Add forces that pull ALL nodes toward center (keeps clusters together)
       graphRef.current.d3Force('x', d3.forceX(0).strength(0.15));
       graphRef.current.d3Force('y', d3.forceY(0).strength(0.15));
 
-      // Center view after simulation settles
       setTimeout(() => {
         graphRef.current?.zoomToFit(400, 50);
       }, 1000);
     }
   }, [correlations]);
 
-
   const centerGraph = () => {
     if (graphRef.current) {
-      graphRef.current.zoomToFit(400, 50); // 400ms animation, 50px padding
+      graphRef.current.zoomToFit(400, 50);
     }
   };
 
@@ -89,17 +88,29 @@ function Dashboard() {
     try {
       setLoading(true);
 
-      const [stocksData, correlationsData, watchlistsData] = await Promise.all([
+      // Load watchlists first so we know which tickers to fetch
+      const [stocksData, watchlistsData] = await Promise.all([
         api.getStocks(),
-        api.getCorrelations(),
         api.getWatchlists().catch(() => ({ watchlists: DEFAULT_WATCHLISTS, activeWatchlist: 'Default' }))
       ]);
 
-      setStocks(stocksData.stocks);
-      setCorrelations(correlationsData);
-      setWatchlists(watchlistsData.watchlists || DEFAULT_WATCHLISTS);
-      setActiveWatchlist(watchlistsData.activeWatchlist || 'Default');
+      const loadedWatchlists = watchlistsData.watchlists || DEFAULT_WATCHLISTS;
+      const loadedActiveWatchlist = watchlistsData.activeWatchlist || 'Default';
+      const tickers = loadedWatchlists[loadedActiveWatchlist] || [];
 
+      setStocks(stocksData.stocks);
+      setWatchlists(loadedWatchlists);
+      setActiveWatchlist(loadedActiveWatchlist);
+
+      // Fetch correlations for the active watchlist
+      if (tickers.length >= 2) {
+        const correlationsData = await api.getCorrelations(tickers);
+        setCorrelations(correlationsData);
+      } else {
+        setCorrelations({ stocks: [], edges: [], calculatedAt: new Date().toISOString() });
+      }
+
+      setCorrelationsStale(false);
       loadSentiment();
 
     } catch (err) {
@@ -113,18 +124,14 @@ function Dashboard() {
   const loadSentiment = async () => {
     try {
       setSentimentLoading(true);
-      console.log('Loading AI sentiment analysis...');
-      
       const data = await api.getStockSentiment();
-      
+
       const sentimentMap = {};
       data.sentiments.forEach(s => {
         sentimentMap[s.ticker] = s;
       });
-      
+
       setSentiments(sentimentMap);
-      console.log('Sentiment analysis loaded:', sentimentMap);
-      
     } catch (err) {
       console.error('Failed to load sentiment:', err);
     } finally {
@@ -132,20 +139,44 @@ function Dashboard() {
     }
   };
 
-  // Remove ticker from current watchlist
-  const removeFromWatchlist = async (ticker) => {
-    const updatedList = currentWatchlist.filter(t => t !== ticker);
-    const updatedWatchlists = { ...watchlists, [activeWatchlist]: updatedList };
-    setWatchlists(updatedWatchlists);
+  // Refresh just correlations (when watchlist changes)
+  const refreshCorrelations = async () => {
+    if (currentWatchlist.length < 2) {
+      setCorrelations({ stocks: [], edges: [], calculatedAt: new Date().toISOString() });
+      setCorrelationsStale(false);
+      return;
+    }
 
+    setCorrelationsLoading(true);
     try {
-      await api.saveWatchlists(updatedWatchlists, activeWatchlist);
+      const correlationsData = await api.getCorrelations(currentWatchlist);
+      setCorrelations(correlationsData);
+      setCorrelationsStale(false);
     } catch (err) {
-      console.error('Failed to save watchlist:', err);
+      console.error('Failed to refresh correlations:', err);
+      setError(err.message);
+    } finally {
+      setCorrelationsLoading(false);
     }
   };
 
-  // Add ticker to current watchlist (with validation)
+  // Force refresh everything (bypasses cache)
+  const forceRefreshAll = async () => {
+    setLoading(true);
+    try {
+      await Promise.all([
+        api.refreshCorrelations(currentWatchlist),
+        api.refreshSentiment()
+      ]);
+      window.location.reload();
+    } catch (err) {
+      console.error('Refresh failed:', err);
+      setError(err.message);
+      setLoading(false);
+    }
+  };
+
+  // Add ticker to current watchlist
   const addTickerToWatchlist = async (e) => {
     e.preventDefault();
     const ticker = tickerInput.trim().toUpperCase();
@@ -164,14 +195,13 @@ function Dashboard() {
     setTickerError('');
 
     try {
-      // Validate ticker against Yahoo Finance
       await api.lookupTicker(ticker);
 
-      // Valid ticker - add to current watchlist
       const updatedList = [...currentWatchlist, ticker];
       const updatedWatchlists = { ...watchlists, [activeWatchlist]: updatedList };
       setWatchlists(updatedWatchlists);
       setTickerInput('');
+      setCorrelationsStale(true);
 
       await api.saveWatchlists(updatedWatchlists, activeWatchlist);
     } catch (err) {
@@ -179,6 +209,20 @@ function Dashboard() {
       setTickerError(err.message || `Ticker "${ticker}" not found`);
     } finally {
       setAddingTicker(false);
+    }
+  };
+
+  // Remove ticker from current watchlist
+  const removeFromWatchlist = async (ticker) => {
+    const updatedList = currentWatchlist.filter(t => t !== ticker);
+    const updatedWatchlists = { ...watchlists, [activeWatchlist]: updatedList };
+    setWatchlists(updatedWatchlists);
+    setCorrelationsStale(true);
+
+    try {
+      await api.saveWatchlists(updatedWatchlists, activeWatchlist);
+    } catch (err) {
+      console.error('Failed to save watchlist:', err);
     }
   };
 
@@ -199,6 +243,7 @@ function Dashboard() {
     setActiveWatchlist(name);
     setNewWatchlistName('');
     setShowCreateWatchlist(false);
+    setCorrelationsStale(true);
 
     try {
       await api.saveWatchlists(updatedWatchlists, name);
@@ -218,6 +263,7 @@ function Dashboard() {
       const result = await api.deleteWatchlist(activeWatchlist);
       setWatchlists(result.watchlists);
       setActiveWatchlist(result.activeWatchlist);
+      setCorrelationsStale(true);
     } catch (err) {
       console.error('Failed to delete watchlist:', err);
     }
@@ -226,6 +272,8 @@ function Dashboard() {
   // Switch active watchlist
   const switchWatchlist = async (name) => {
     setActiveWatchlist(name);
+    setCorrelationsStale(true);
+
     try {
       await api.saveWatchlists(watchlists, name);
     } catch (err) {
@@ -237,6 +285,7 @@ function Dashboard() {
   const clearCurrentWatchlist = async () => {
     const updatedWatchlists = { ...watchlists, [activeWatchlist]: [] };
     setWatchlists(updatedWatchlists);
+    setCorrelationsStale(true);
 
     try {
       await api.saveWatchlists(updatedWatchlists, activeWatchlist);
@@ -245,84 +294,54 @@ function Dashboard() {
     }
   };
 
-  const refreshData = async (forceRefresh = false) => {
-    setLoading(true);
-    try {
-      if (forceRefresh) {
-        // Force refresh correlations and sentiment (bypasses cache)
-        console.log('Force refreshing all data...');
-        await Promise.all([
-          api.refreshCorrelations(),
-          api.refreshSentiment()
-        ]);
-
-        // Reload the page to get fresh data and reset graph state
-        window.location.reload();
-      } else {
-        await loadData();
-      }
-    } catch (err) {
-      console.error('Refresh failed:', err);
-      setError(err.message);
-      setLoading(false);
-    }
-  };
-
+  // Helper functions for graph rendering
   const getNodeColor = (sentiment) => {
     if (!sentiment || sentiment.confidence < 50) {
       return '#64748b';
     }
 
     const { sentiment: s } = sentiment;
-
-    // Use solid dark colors for all positive/negative (glow indicates very_positive/very_negative)
-    if (s === 'very_positive' || s === 'positive') return '#10b981'; // Dark green
-    if (s === 'very_negative' || s === 'negative') return '#ef4444'; // Dark red
+    if (s === 'very_positive' || s === 'positive') return '#10b981';
+    if (s === 'very_negative' || s === 'negative') return '#ef4444';
 
     return '#64748b';
   };
 
-  const shouldBlink = (sentiment) => {
+  const shouldGlow = (sentiment) => {
     if (!sentiment) return false;
-
     return (
       (sentiment.sentiment === 'very_positive' || sentiment.sentiment === 'very_negative') &&
       sentiment.confidence >= 50
     );
   };
 
-  // Calculate node size based on number of connections (degree centrality)
-  const calculateNodeSizes = (edges, stocks) => {
+  const calculateNodeSizes = (edges, stockList) => {
     const connectionCount = {};
-    
-    // Count connections for each stock
-    stocks.forEach(ticker => {
+
+    stockList.forEach(ticker => {
       connectionCount[ticker] = 0;
     });
-    
+
     edges.forEach(edge => {
       connectionCount[edge.source]++;
       connectionCount[edge.target]++;
     });
-    
-    // Find max connections
-    const maxConnections = Math.max(...Object.values(connectionCount));
-    
-    // Map to sizes: 8 (min) to 20 (max)
+
+    const maxConnections = Math.max(...Object.values(connectionCount), 1);
+
     const sizes = {};
-    stocks.forEach(ticker => {
+    stockList.forEach(ticker => {
       const connections = connectionCount[ticker];
-      sizes[ticker] = 8 + (connections / maxConnections) * 12; // 8-20 range
+      sizes[ticker] = 8 + (connections / maxConnections) * 12;
     });
-    
+
     return sizes;
   };
 
-  // Prepare graph data with hub-based sizing
+  // Prepare graph data
   const graphData = correlations ? (() => {
     const nodeSizes = calculateNodeSizes(correlations.edges, correlations.stocks);
 
-    // Count actual connections per stock
     const connectionCounts = {};
     correlations.stocks.forEach(ticker => {
       connectionCounts[ticker] = 0;
@@ -340,38 +359,32 @@ function Dashboard() {
         return {
           id: ticker,
           name: ticker,
-          val: nodeSizes[ticker], // SIZE BASED ON CONNECTIONS!
+          val: nodeSizes[ticker],
           color: getNodeColor(sentiment),
           sentiment: sentiment,
           stock: stock,
-          blink: shouldBlink(sentiment),
-          connections: connectionCounts[ticker] || 0 // Actual connection count
+          glow: shouldGlow(sentiment),
+          connections: connectionCounts[ticker] || 0
         };
       }),
       links: correlations.edges.map(edge => {
-        // Get node sizes for this edge
         const sourceSize = nodeSizes[edge.source];
         const targetSize = nodeSizes[edge.target];
         const avgNodeSize = (sourceSize + targetSize) / 2;
-        
-        // Base distance from correlation
         const baseDistance = 200 * (1 - edge.correlation);
-
-        // Add node size buffer - larger nodes need MUCH more distance
-        // avgNodeSize ranges from 8-20, so this creates significant spacing for big nodes
         const sizeBuffer = Math.pow(avgNodeSize, 2) * 1.5;
-        
+
         return {
           source: edge.source,
           target: edge.target,
           value: edge.correlation,
-          // Final distance = base + buffer for node sizes
           distance: baseDistance + sizeBuffer,
         };
       })
     };
   })() : { nodes: [], links: [] };
 
+  // Loading screen
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -389,7 +402,6 @@ function Dashboard() {
       <nav className="bg-white border-b border-gray-200 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-12">
-            {/* Logo / Brand */}
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center">
                 <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -399,14 +411,12 @@ function Dashboard() {
               <span className="text-base font-bold text-gray-900">StockViz</span>
             </div>
 
-            {/* Nav Links */}
             <div className="hidden md:flex items-center gap-6">
               <a href="#" className="text-blue-600 font-medium text-sm">Dashboard</a>
               <a href="#" className="text-gray-500 hover:text-gray-900 transition-colors text-sm">Markets</a>
               <a href="#" className="text-gray-500 hover:text-gray-900 transition-colors text-sm">Analysis</a>
             </div>
 
-            {/* Right side actions */}
             <div className="flex items-center gap-2">
               {sentimentLoading && (
                 <span className="text-xs text-blue-600 flex items-center gap-1">
@@ -415,7 +425,7 @@ function Dashboard() {
                 </span>
               )}
               <button
-                onClick={() => refreshData(true)}
+                onClick={forceRefreshAll}
                 className="px-3 py-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors text-sm"
               >
                 Refresh All
@@ -440,7 +450,7 @@ function Dashboard() {
         )}
 
         <div className="space-y-4">
-          {/* Correlation Graph - Main Feature */}
+          {/* Correlation Graph */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
             <div className="flex justify-between items-center mb-3">
               <div>
@@ -457,110 +467,142 @@ function Dashboard() {
                   Center View
                 </button>
                 <span className="text-gray-500 text-xs">
-                  {correlations?.edges.length} connections
+                  {correlations?.edges.length || 0} connections
                 </span>
               </div>
             </div>
 
+            {/* Stale correlations warning */}
+            {correlationsStale && (
+              <div className="mb-3 flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">
+                <span className="text-amber-800 text-sm">
+                  Watchlist changed — graph may be outdated
+                </span>
+                <button
+                  onClick={refreshCorrelations}
+                  disabled={correlationsLoading || currentWatchlist.length < 2}
+                  className="px-3 py-1 bg-amber-600 hover:bg-amber-700 disabled:bg-amber-300 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
+                >
+                  {correlationsLoading ? (
+                    <>
+                      <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Updating...
+                    </>
+                  ) : (
+                    'Update Graph'
+                  )}
+                </button>
+              </div>
+            )}
+
+            {/* Not enough tickers warning */}
+            {currentWatchlist.length < 2 && (
+              <div className="mb-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
+                <span className="text-blue-800 text-sm">
+                  Add at least 2 tickers to your watchlist to see correlations
+                </span>
+              </div>
+            )}
+
             {/* Top Correlations */}
-            <div className="mb-3 flex gap-2 flex-wrap items-center">
-              <span className="text-gray-500 text-xs">Strongest:</span>
-              {correlations?.edges
-                .sort((a, b) => b.correlation - a.correlation)
-                .slice(0, 3)
-                .map(edge => (
-                  <span
-                    key={`${edge.source}-${edge.target}`}
-                    className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-xs font-medium"
-                  >
-                    {edge.source}-{edge.target} ({(edge.correlation * 100).toFixed(0)}%)
-                  </span>
-                ))
-              }
-            </div>
+            {correlations?.edges.length > 0 && (
+              <div className="mb-3 flex gap-2 flex-wrap items-center">
+                <span className="text-gray-500 text-xs">Strongest:</span>
+                {correlations.edges
+                  .sort((a, b) => b.correlation - a.correlation)
+                  .slice(0, 3)
+                  .map(edge => (
+                    <span
+                      key={`${edge.source}-${edge.target}`}
+                      className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-xs font-medium"
+                    >
+                      {edge.source}-{edge.target} ({(edge.correlation * 100).toFixed(0)}%)
+                    </span>
+                  ))
+                }
+              </div>
+            )}
 
             <div ref={containerRef} className="bg-slate-900 rounded-xl overflow-hidden" style={{ height: '770px' }}>
-              <ForceGraph2D
-                ref={graphRef}
-                graphData={graphData}
-                width={graphDimensions.width}
-                height={graphDimensions.height}
-                nodeLabel={node => {
-                  const lines = [node.id];
-                  if (node.stock) {
-                    lines.push(`$${node.stock.price.toFixed(2)}`);
-                    lines.push(`${node.stock.change >= 0 ? '+' : ''}${node.stock.changePercent.toFixed(2)}%`);
-                  }
-                  if (node.sentiment && node.sentiment.confidence >= 70) {
+              {graphData.nodes.length > 0 ? (
+                <ForceGraph2D
+                  ref={graphRef}
+                  graphData={graphData}
+                  width={graphDimensions.width}
+                  height={graphDimensions.height}
+                  nodeLabel={node => {
+                    const lines = [node.id];
+                    if (node.stock) {
+                      lines.push(`$${node.stock.price.toFixed(2)}`);
+                      lines.push(`${node.stock.change >= 0 ? '+' : ''}${node.stock.changePercent.toFixed(2)}%`);
+                    }
+                    if (node.sentiment && node.sentiment.confidence >= 70) {
+                      lines.push('');
+                      lines.push(node.sentiment.summary);
+                    }
                     lines.push('');
-                    lines.push(node.sentiment.summary);
-                  }
-                  lines.push('');
-                  lines.push(`Connections: ${node.connections}`);
-                  return lines.join('\n');
-                }}
-                linkLabel={link => `Correlation: ${(link.value * 100).toFixed(0)}%`}
-                nodeCanvasObject={(node, ctx, globalScale) => {
-                  const label = node.id;
-                  // Scale font size with node size (node.val ranges from 8-20)
-                  const fontSize = (node.val * 0.8) / globalScale;
+                    lines.push(`Connections: ${node.connections}`);
+                    return lines.join('\n');
+                  }}
+                  linkLabel={link => `Correlation: ${(link.value * 100).toFixed(0)}%`}
+                  nodeCanvasObject={(node, ctx, globalScale) => {
+                    const label = node.id;
+                    const fontSize = (node.val * 0.8) / globalScale;
 
-                  // Draw static glow for major news (very_positive/very_negative)
-                  if (node.blink) {
-                    // Outer glow ring
+                    if (node.glow) {
+                      ctx.beginPath();
+                      ctx.arc(node.x, node.y, node.val + 8, 0, 2 * Math.PI);
+                      ctx.fillStyle = node.color + '30';
+                      ctx.fill();
+
+                      ctx.beginPath();
+                      ctx.arc(node.x, node.y, node.val + 5, 0, 2 * Math.PI);
+                      ctx.fillStyle = node.color + '50';
+                      ctx.fill();
+
+                      ctx.beginPath();
+                      ctx.arc(node.x, node.y, node.val + 2, 0, 2 * Math.PI);
+                      ctx.fillStyle = node.color + '70';
+                      ctx.fill();
+                    }
+
                     ctx.beginPath();
-                    ctx.arc(node.x, node.y, node.val + 8, 0, 2 * Math.PI);
-                    ctx.fillStyle = node.color + '30';
+                    ctx.arc(node.x, node.y, node.val, 0, 2 * Math.PI);
+                    ctx.fillStyle = node.color;
                     ctx.fill();
 
-                    // Middle glow ring
-                    ctx.beginPath();
-                    ctx.arc(node.x, node.y, node.val + 5, 0, 2 * Math.PI);
-                    ctx.fillStyle = node.color + '50';
-                    ctx.fill();
+                    ctx.font = `bold ${fontSize}px Sans-Serif`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillStyle = 'white';
+                    ctx.fillText(label, node.x, node.y);
+                  }}
+                  linkWidth={3}
+                  linkDistance={link => link.distance}
+                  linkColor={() => 'rgba(148, 163, 184, 0.5)'}
+                  backgroundColor="#0f172a"
+                  d3VelocityDecay={0.5}
+                  d3AlphaDecay={0.02}
+                  d3AlphaMin={0.001}
+                  cooldownTicks={500}
+                  warmupTicks={100}
+                  onNodeClick={(node) => {
+                    if (!node.stock) return;
 
-                    // Inner glow ring
-                    ctx.beginPath();
-                    ctx.arc(node.x, node.y, node.val + 2, 0, 2 * Math.PI);
-                    ctx.fillStyle = node.color + '70';
-                    ctx.fill();
-                  }
+                    let message = `${node.stock.ticker}\nPrice: $${node.stock.price.toFixed(2)}\nChange: ${node.stock.change >= 0 ? '+' : ''}${node.stock.changePercent.toFixed(2)}%\nConnections: ${node.connections}`;
 
-                  // Draw main node
-                  ctx.beginPath();
-                  ctx.arc(node.x, node.y, node.val, 0, 2 * Math.PI);
-                  ctx.fillStyle = node.color;
-                  ctx.fill();
+                    if (node.sentiment && node.sentiment.confidence >= 70) {
+                      message += `\n\nAI Sentiment: ${node.sentiment.sentiment} (${node.sentiment.confidence}% confident)\n${node.sentiment.summary}`;
+                    }
 
-                  // Draw label
-                  ctx.font = `bold ${fontSize}px Sans-Serif`;
-                  ctx.textAlign = 'center';
-                  ctx.textBaseline = 'middle';
-                  ctx.fillStyle = 'white';
-                  ctx.fillText(label, node.x, node.y);
-                }}
-                linkWidth={3}
-                linkDistance={link => link.distance}
-                linkColor={() => 'rgba(148, 163, 184, 0.5)'}
-                backgroundColor="#0f172a"
-                d3VelocityDecay={0.5}
-                d3AlphaDecay={0.02}
-                d3AlphaMin={0.001}
-                cooldownTicks={500}
-                warmupTicks={100}
-                onNodeClick={(node) => {
-                  const stock = node.stock;
-                  const sentiment = node.sentiment;
-
-                  let message = `${stock.ticker}\nPrice: $${stock.price.toFixed(2)}\nChange: ${stock.change >= 0 ? '+' : ''}${stock.changePercent.toFixed(2)}%\nConnections: ${node.connections}`;
-
-                  if (sentiment && sentiment.confidence >= 70) {
-                    message += `\n\nAI Sentiment: ${sentiment.sentiment} (${sentiment.confidence}% confident)\n${sentiment.summary}`;
-                  }
-
-                  alert(message);
-                }}
-              />
+                    alert(message);
+                  }}
+                />
+              ) : (
+                <div className="h-full flex items-center justify-center">
+                  <p className="text-slate-400">No correlation data to display</p>
+                </div>
+              )}
             </div>
 
             {/* Legend */}
@@ -578,7 +620,7 @@ function Dashboard() {
             </div>
           </div>
 
-          {/* Stock List and Watchlist - Bottom Section */}
+          {/* Stock List and Watchlist */}
           <div className="grid lg:grid-cols-2 gap-4">
             {/* Live Prices */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
@@ -586,14 +628,12 @@ function Dashboard() {
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                 {stocks.map(stock => {
                   const sentiment = sentiments[stock.ticker];
-                  const showPulse = shouldBlink(sentiment);
+                  const showPulse = shouldGlow(sentiment);
 
                   return (
                     <div
                       key={stock.ticker}
-                      className={`p-2 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors border border-gray-100 ${
-                        showPulse ? 'animate-pulse' : ''
-                      }`}
+                      className={`p-2 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors border border-gray-100 ${showPulse ? 'animate-pulse' : ''}`}
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1">
@@ -705,9 +745,7 @@ function Dashboard() {
                       setTickerError('');
                     }}
                     placeholder="Enter ticker (e.g., AAPL)"
-                    className={`flex-1 px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-                      tickerError ? 'border-red-300' : 'border-gray-200'
-                    }`}
+                    className={`flex-1 px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${tickerError ? 'border-red-300' : 'border-gray-200'}`}
                     disabled={addingTicker}
                   />
                   <button
@@ -762,7 +800,7 @@ function Dashboard() {
                               </span>
                             </>
                           ) : (
-                            <span className="text-gray-400 text-xs">Loading...</span>
+                            <span className="text-gray-400 text-xs">Not in dataset</span>
                           )}
                         </div>
                       </div>
