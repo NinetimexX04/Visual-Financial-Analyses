@@ -7,7 +7,7 @@ import * as d3 from 'd3-force';
 import { LineChart, Line, ResponsiveContainer, Tooltip } from 'recharts';
 
 const DEFAULT_WATCHLISTS = {
-  'Default': ['AAPL', 'NVDA', 'GOOGL', 'XOM', 'JPM', 'JNJ', 'WMT']
+  'Default': ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'AMD', 'INTC', 'CRM', 'ORCL', 'ADBE', 'NFLX', 'CSCO', 'QCOM', 'IBM', 'AVGO', 'TXN', 'MU', 'UBER']
 };
 
 function Dashboard() {

@@ -61,6 +61,7 @@ A stock correlation visualization app with AI-powered sentiment analysis.
 - `GET /api/stocks?tickers=AAPL,TSLA` - Get current prices
 - `GET /api/stocks/sentiment?tickers=AAPL,TSLA` - Get AI sentiment
 - `GET /api/correlations?tickers=AAPL,TSLA,NVDA` - Get correlation data
+- `GET /api/stocks/history/:ticker` - Get 1-year price history
 
 ## Local Development
 
@@ -121,17 +122,6 @@ firebase functions:secrets:set NEWS_API_KEY
 firebase functions:secrets:set ANTHROPIC_API_KEY
 ```
 
-## Screenshots
-
-### Login
-![Login](screenshots/login.png)
-
-### Profile
-![Profile](screenshots/profile.png)
-
-### Dashboard
-![Dashboard](screenshots/dashboard.png)
-
 ## Security
 
 - No AWS credentials in frontend code
@@ -142,4 +132,4 @@ firebase functions:secrets:set ANTHROPIC_API_KEY
 
 ## Author
 
-Alex - UCCS - 26
+Alex - UCCS '26
