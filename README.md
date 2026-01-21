@@ -4,7 +4,7 @@ A stock correlation visualization app with AI-powered sentiment analysis.
 
 **Live Demo:** https://visual-finance-analyzer.web.app
 
-**Demo Video:** [Link to Loom/video]
+**Demo Video:** [[Link to Loom/video]](https://youtu.be/DnSyKF6bjn4)
 
 ## Features
 
