@@ -7,9 +7,8 @@ const TABLE_NAME = process.env.DDB_TABLE_NAME || 'Users';
 
 // Default watchlist for new users
 const DEFAULT_WATCHLISTS = {
-  'Default': ['AAPL', 'NVDA', 'GOOGL', 'XOM', 'JPM', 'JNJ', 'WMT']
+  'Default': ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'AMD', 'INTC', 'CRM', 'ORCL', 'ADBE', 'NFLX', 'CSCO', 'QCOM', 'IBM', 'AVGO', 'TXN', 'MU', 'UBER']
 };
-
 async function verifyToken(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
